@@ -1,0 +1,77 @@
+[
+  {
+    "slug": "coffee",
+    "ru": "Кофейня",
+    "en": "Coffee Shop"
+  },
+  {
+    "slug": "drow",
+    "ru": "Дровка (обычная)",
+    "en": "Drow Ranger"
+  },
+  {
+    "slug": "drow-mirrored",
+    "ru": "Дровка (зеркальная)",
+    "en": "Drow Ranger (Mirrored)"
+  },
+  {
+    "slug": "girl",
+    "ru": "Девочка",
+    "en": "Girl"
+  },
+  {
+    "slug": "guts-sword",
+    "ru": "Меч гатса",
+    "en": "Guts' Sword"
+  },
+  {
+    "slug": "ichigo",
+    "ru": "Ичиго (bleach)",
+    "en": "Ichigo (Bleach)"
+  },
+  {
+    "slug": "illidan",
+    "ru": "Иллидан (warcraft)",
+    "en": "Illidan (Warcraft)"
+  },
+  {
+    "slug": "japanese-terrace-rain",
+    "ru": "Японская терасса (ДОЖДЬ)",
+    "en": "Japanese Terrace (Rain)"
+  },
+  {
+    "slug": "katana-field",
+    "ru": "Катана в поле",
+    "en": "Katana in the Field"
+  },
+  {
+    "slug": "killua",
+    "ru": "Килуа (hunter x hunter)",
+    "en": "Killua (Hunter × Hunter)"
+  },
+  {
+    "slug": "reze",
+    "ru": "Резе (chainsaw man)",
+    "en": "Reze (Chainsaw Man)"
+  },
+  {
+    "slug": "samurai",
+    "ru": "Самурай (vagabond)",
+    "en": "Samurai (Vagabond)"
+  },
+  {
+    "slug": "street-rain",
+    "ru": "Дождик на улице",
+    "en": "Street Rain"
+  },
+  {
+    "slug": "vrka",
+    "ru": "Врка (dota2)",
+    "en": "Windranger (Dota 2)"
+  },
+  {
+    "slug": "winter-ruins",
+    "ru": "Зимние руины",
+    "en": "Winter Ruins"
+  }
+]
