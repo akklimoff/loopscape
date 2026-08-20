@@ -13,7 +13,7 @@ loops a video in each.
 
 ## Install
 
-Download `Loopscape-1.0.dmg` from the [latest release](https://github.com/akklimoff/loopscape/releases/latest),
+Download the DMG from the [latest release](https://github.com/akklimoff/loopscape/releases/latest),
 open it, and drag Loopscape onto the Applications folder.
 
 ### Gatekeeper
@@ -33,8 +33,7 @@ xattr -dr com.apple.quarantine /Applications/Loopscape.app
 
 ### From source
 
-Building locally avoids the quarantine flag entirely, and installs the launch agent so the
-app starts at login:
+Building locally avoids the quarantine flag entirely:
 
 ```sh
 git clone https://github.com/akklimoff/loopscape.git
@@ -81,8 +80,12 @@ disappears.
 ## Menu
 
 The status item is the entire interface: pick a pack, set the rotation interval (5 / 15 /
-30 / 60 minutes, or off), jump to the next one, open the videos folder, quit. Choosing a
-pack pins it; turning the interval off pins whatever is showing, so it survives a restart.
+30 / 60 minutes, or off), jump to the next one, open the videos folder, toggle **Launch at
+login**, quit. Choosing a pack pins it; turning the interval off pins whatever is showing,
+so it survives a restart.
+
+Launch at login is on by default and is backed by `SMAppService`, so it shows up in System
+Settings under Login Items. Unchecking it there and in the menu are the same switch.
 
 The UI is Russian when the system's primary language is Russian, English otherwise.
 
@@ -92,7 +95,7 @@ The UI is Russian when the system's primary language is Russian, English otherwi
 - 16:9 clips are cropped top and bottom on ultrawide displays — `resizeAspectFill` never
   letterboxes.
 - Playback pauses when the displays sleep and resumes on wake.
-- Quitting from the menu keeps it closed until the next login; the agent does not respawn it.
+- Quitting from the menu keeps it closed until the next login; nothing respawns it.
 
 ## License
 

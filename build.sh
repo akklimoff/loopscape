@@ -1,12 +1,12 @@
 #!/bin/bash
 # Usage:
-#   ./build.sh              build, install to /Applications, start at login
+#   ./build.sh              build, install to /Applications and launch
 #   ./build.sh --dest DIR   build the bundle into DIR and stop (used by make-dmg.sh)
 set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
-VERSION="1.0"
+VERSION="1.1"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DEST="/Applications"
@@ -20,15 +20,13 @@ APP="${DEST}/${APP_NAME}.app"
 
 mkdir -p "$HERE/.build"
 
-if [[ ! -f "$HERE/${APP_NAME}.icns" ]]; then
-    echo "==> rendering icon"
-    swiftc -swift-version 5 -o "$HERE/.build/makeicon" "$HERE/make-icon.swift"
-    "$HERE/.build/makeicon" "$HERE/.build/icon1024.png"
+if [[ ! -f "$HERE/${APP_NAME}.icns" || "$HERE/icon.png" -nt "$HERE/${APP_NAME}.icns" ]]; then
+    echo "==> building icon"
     ICONSET="$HERE/.build/${APP_NAME}.iconset"
     rm -rf "$ICONSET"; mkdir -p "$ICONSET"
     for s in 16 32 128 256 512; do
-        sips -z $s $s "$HERE/.build/icon1024.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-        sips -z $((s*2)) $((s*2)) "$HERE/.build/icon1024.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+        sips -z $s $s "$HERE/icon.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+        sips -z $((s*2)) $((s*2)) "$HERE/icon.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
     done
     iconutil -c icns "$ICONSET" -o "$HERE/${APP_NAME}.icns"
 fi
@@ -74,30 +72,18 @@ fi
 # A hand-assembled bundle stays invisible to Spotlight until it is registered.
 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$APP"
 
-echo "==> installing launch agent"
-AGENT="$HOME/Library/LaunchAgents/${BUNDLE_ID}.plist"
-mkdir -p "$(dirname "$AGENT")" "$HOME/Library/Application Support/${APP_NAME}/videos"
-cat > "$AGENT" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${BUNDLE_ID}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${APP}/Contents/MacOS/${APP_NAME}</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><false/>
-  <key>ProcessType</key><string>Interactive</string>
-</dict>
-</plist>
-PLIST
+# Builds up to 1.0 started the app from a launch agent. Login is now a checkbox in the
+# menu, backed by SMAppService, so the old agent would only launch a second copy.
+LEGACY_AGENT="$HOME/Library/LaunchAgents/${BUNDLE_ID}.plist"
+if [[ -f "$LEGACY_AGENT" ]]; then
+    echo "==> removing legacy launch agent"
+    launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
+    rm -f "$LEGACY_AGENT"
+fi
 
-launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
-# bootout is asynchronous; the single-instance guard would make a new process exit if the
-# old one is still winding down.
-sleep 2
-launchctl bootstrap "gui/$(id -u)" "$AGENT"
+pkill -x "${APP_NAME}" 2>/dev/null || true
+sleep 1
+mkdir -p "$HOME/Library/Application Support/${APP_NAME}/videos"
+open -a "$APP"
 
 echo "==> done, ${APP_NAME} is running from ${APP}"

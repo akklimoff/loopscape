@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ServiceManagement
 
 private let defaultRoot: URL = {
     let base = FileManager.default
@@ -13,6 +14,7 @@ private enum Key {
     static let pinned = "pinnedSlug"
     static let shuffle = "shuffle"
     static let minutes = "rotateMinutes"
+    static let loginAsked = "loginItemDecided"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -113,6 +115,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if defaults.object(forKey: Key.minutes) == nil { defaults.set(15, forKey: Key.minutes) }
         if defaults.object(forKey: Key.shuffle) == nil { defaults.set(true, forKey: Key.shuffle) }
+        // A wallpaper that vanishes after a reboot is useless, so opt in once and let the
+        // menu switch it off afterwards.
+        if defaults.object(forKey: Key.loginAsked) == nil {
+            defaults.set(true, forKey: Key.loginAsked)
+            try? SMAppService.mainApp.register()
+        }
 
         packs = loadPacks()
         guard !packs.isEmpty else {
@@ -328,6 +336,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reveal.target = self
         menu.addItem(reveal)
 
+        let login = NSMenuItem(title: Lang.t("Launch at login", "Запускать при входе"),
+                               action: #selector(toggleLoginItem),
+                               keyEquivalent: "")
+        login.target = self
+        switch SMAppService.mainApp.status {
+        case .enabled: login.state = .on
+        case .requiresApproval: login.state = .mixed
+        default: login.state = .off
+        }
+        menu.addItem(login)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: Lang.t("Quit", "Выйти"), action: #selector(quit), keyEquivalent: "q")
@@ -379,6 +398,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defaults.set(slug, forKey: Key.pinned)
         }
         applySelection(slug)
+    }
+
+    @objc private func toggleLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            NSSound.beep()
+        }
+        if service.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        }
+        refreshMenu()
     }
 
     @objc private func revealFolder() {
