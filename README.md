@@ -13,16 +13,40 @@ loops a video in each.
 
 ## Install
 
+Download `Loopscape-1.0.dmg` from the [latest release](https://github.com/akklimoff/loopscape/releases/latest),
+open it, and drag Loopscape onto the Applications folder.
+
+### Gatekeeper
+
+The app is ad-hoc signed and **not notarized** — there is no paid Apple Developer
+certificate behind it, so macOS blocks the first launch with "Apple could not verify that
+this app is free of malware". To allow it:
+
+1. Open Loopscape once and let the warning appear
+2. System Settings -> Privacy & Security -> scroll down -> **Open Anyway**
+
+Or strip the quarantine flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Loopscape.app
+```
+
+### From source
+
+Building locally avoids the quarantine flag entirely, and installs the launch agent so the
+app starts at login:
+
 ```sh
 git clone https://github.com/akklimoff/loopscape.git
 cd loopscape
 ./build.sh
 ```
 
-`build.sh` compiles the binary, assembles `/Applications/Loopscape.app`, ad-hoc signs it,
-registers it with Launch Services and installs a launch agent that starts it at login.
-
 Requires Apple Silicon and the Xcode command line tools (`xcode-select --install`).
+`make-dmg.sh` produces the disk image.
+
+Loopscape ships with no videos, so it will tell you the folder is empty and quit until you
+add some — see below.
 
 ## Adding wallpapers
 
