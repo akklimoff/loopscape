@@ -122,17 +122,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? SMAppService.mainApp.register()
         }
 
-        packs = loadPacks()
-        guard !packs.isEmpty else {
-            alertAndQuit(Lang.t("No videos found in \(root.path)/videos",
-                                "Не нашёл ни одного видео в \(root.path)/videos"))
-            return
-        }
+        // A drag-and-drop install has no setup step, so the folder has to appear on its own
+        // or the first launch is a dead end.
+        try? FileManager.default.createDirectory(at: videosDirectory,
+                                                 withIntermediateDirectories: true)
 
         buildStatusItem()
-        rebuildScreens()
-        applySelection(pick())
-        restartTimer()
+        startIfReady()
+        refreshMenu()
 
         NotificationCenter.default.addObserver(
             self,
@@ -160,6 +157,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for pack in decoded { known[pack.slug] = pack }
         }
         return slugs.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
+    }
+
+    private var videosDirectory: URL { root.appendingPathComponent("videos") }
+
+    /// Runs again whenever the menu opens while empty, so dropping clips in needs no restart.
+    private func startIfReady() {
+        guard wallpapers.isEmpty else { return }
+        packs = loadPacks()
+        guard !packs.isEmpty else { return }
+        rebuildScreens()
+        applySelection(pick())
+        restartTimer()
     }
 
     private func url(for slug: String) -> URL {
@@ -278,6 +287,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let menu = statusItem?.menu else { return }
         menu.removeAllItems()
 
+        guard !packs.isEmpty else {
+            appendEmptyState(to: menu)
+            return
+        }
+
         let pinned = defaults.string(forKey: Key.pinned)
         for pack in packs {
             let item = NSMenuItem(title: pack.title,
@@ -330,31 +344,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         next.target = self
         menu.addItem(next)
 
-        let reveal = NSMenuItem(title: Lang.t("Open videos folder", "Открыть папку с видео"),
-                                action: #selector(revealFolder),
-                                keyEquivalent: "")
-        reveal.target = self
-        menu.addItem(reveal)
-
-        let login = NSMenuItem(title: Lang.t("Launch at login", "Запускать при входе"),
-                               action: #selector(toggleLoginItem),
-                               keyEquivalent: "")
-        login.target = self
-        switch SMAppService.mainApp.status {
-        case .enabled: login.state = .on
-        case .requiresApproval: login.state = .mixed
-        default: login.state = .off
-        }
-        menu.addItem(login)
-
+        menu.addItem(revealItem())
+        menu.addItem(loginItem())
         menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: Lang.t("Quit", "Выйти"), action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+        menu.addItem(quitItem())
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) { refreshMenu() }
+    private func appendEmptyState(to menu: NSMenu) {
+        let hint = NSMenuItem(title: Lang.t("No videos yet — drop clips in the folder below",
+                                            "Видео пока нет — положи ролики в папку ниже"),
+                              action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        menu.addItem(hint)
+        menu.addItem(revealItem())
+        menu.addItem(.separator())
+        menu.addItem(loginItem())
+        menu.addItem(.separator())
+        menu.addItem(quitItem())
+    }
+
+    private func revealItem() -> NSMenuItem {
+        let item = NSMenuItem(title: Lang.t("Open videos folder", "Открыть папку с видео"),
+                              action: #selector(revealFolder), keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    private func loginItem() -> NSMenuItem {
+        let item = NSMenuItem(title: Lang.t("Launch at login", "Запускать при входе"),
+                              action: #selector(toggleLoginItem), keyEquivalent: "")
+        item.target = self
+        switch SMAppService.mainApp.status {
+        case .enabled: item.state = .on
+        case .requiresApproval: item.state = .mixed
+        default: item.state = .off
+        }
+        return item
+    }
+
+    private func quitItem() -> NSMenuItem {
+        let item = NSMenuItem(title: Lang.t("Quit", "Выйти"),
+                              action: #selector(quit), keyEquivalent: "q")
+        item.target = self
+        return item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if packs.isEmpty { startIfReady() }
+        refreshMenu()
+    }
 
     @objc private func choosePack(_ sender: NSMenuItem) {
         guard let slug = sender.representedObject as? String else { return }
@@ -418,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func revealFolder() {
-        NSWorkspace.shared.open(root.appendingPathComponent("videos"))
+        NSWorkspace.shared.open(videosDirectory)
     }
 
     @objc private func quit() {
@@ -426,13 +464,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    private func alertAndQuit(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Loopscape"
-        alert.informativeText = message
-        alert.runModal()
-        NSApp.terminate(nil)
-    }
 }
 
 // launchd's RunAtLoad and a manual launch can race; a second instance would stack

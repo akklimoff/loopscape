@@ -44,8 +44,8 @@ cd loopscape
 Requires Apple Silicon and the Xcode command line tools (`xcode-select --install`).
 `make-dmg.sh` produces the disk image.
 
-Loopscape ships with no videos, so it will tell you the folder is empty and quit until you
-add some — see below.
+Loopscape ships with no videos. The first launch creates the videos folder and the menu
+says it is empty until you put something in it — see below.
 
 ## Adding wallpapers
 
