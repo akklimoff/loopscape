@@ -174,10 +174,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
            let decoded = try? JSONDecoder().decode([Pack].self, from: data) {
             for pack in decoded { known[pack.slug] = pack }
         }
+        syncSaverMirror()
         return videoFiles.keys.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
     }
 
     private var videosDirectory: URL { root.appendingPathComponent("videos") }
+
+    // MARK: - screen saver mirror
+
+    private static let saverMirror = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Containers/com.apple.ScreenSaver.Engine.legacyScreenSaver")
+        .appendingPathComponent("Data/Library/Application Support/Loopscape/videos")
+
+    /// The companion .saver runs inside the sandboxed legacyScreenSaver appex, which cannot
+    /// see the real videos folder — its home is its own container. Mirror the clips there as
+    /// hardlinks: same bytes on disk, and library edits reach the saver on the next pack load.
+    private func syncSaverMirror() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.saverMirror, withIntermediateDirectories: true)
+
+        let wanted = Set(videoFiles.values.map { $0.lastPathComponent })
+        let existing = (try? fm.contentsOfDirectory(atPath: Self.saverMirror.path)) ?? []
+        for name in existing where !wanted.contains(name) && name != "current.txt" {
+            try? fm.removeItem(at: Self.saverMirror.appendingPathComponent(name))
+        }
+        for source in videoFiles.values {
+            let mirror = Self.saverMirror.appendingPathComponent(source.lastPathComponent)
+            let sourceInode = (try? fm.attributesOfItem(atPath: source.path))?[.systemFileNumber] as? Int
+            let mirrorInode = (try? fm.attributesOfItem(atPath: mirror.path))?[.systemFileNumber] as? Int
+            if sourceInode != nil, sourceInode == mirrorInode { continue }
+            try? fm.removeItem(at: mirror)
+            try? fm.linkItem(at: source, to: mirror)
+        }
+    }
+
+    private func markCurrentForSaver(_ slug: String) {
+        try? slug.write(to: Self.saverMirror.appendingPathComponent("current.txt"),
+                        atomically: true, encoding: .utf8)
+    }
 
     /// Runs again whenever the menu opens while empty, so dropping clips in needs no restart.
     private func startIfReady() {
@@ -270,6 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         currentSlug = slug
         startPlayback(slug)
         syncDesktopPicture(slug)
+        markCurrentForSaver(slug)
         refreshMenu()
     }
 

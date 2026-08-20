@@ -90,6 +90,19 @@ Settings under Login Items. Unchecking it there and in the menu are the same swi
 
 The UI is Russian when the system's primary language is Russian, English otherwise.
 
+## Lock screen
+
+The real lock screen belongs to `loginwindow` and is off-limits to third-party apps, so
+Loopscape gets there the only sanctioned way: a screen saver. `build.sh` installs
+`LoopscapeSaver.saver` into `~/Library/Screen Savers/`; select **Loopscape** in System
+Settings → Screen Saver, then in **Lock Screen** set *Start Screen Saver when inactive*
+to taste. Once the Mac locks and the idle delay passes, the saver plays the same pack the
+desktop is showing (random if it cannot tell).
+
+The saver runs inside the sandboxed `legacyScreenSaver` appex, which cannot read the real
+videos folder — the app mirrors the clips into the appex container as hardlinks (no extra
+disk) on every pack load and records the current pack in `current.txt` there.
+
 ## Notes
 
 - Videos are yours to supply; none ship with this repo.

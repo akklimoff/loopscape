@@ -35,6 +35,35 @@ echo "==> compiling"
 swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
     -o "$HERE/.build/${APP_NAME}" "$HERE/${APP_NAME}.swift"
 
+SAVER_NAME="${APP_NAME}Saver"
+echo "==> compiling screen saver"
+swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
+    -parse-as-library -emit-library -module-name "${SAVER_NAME}" \
+    -framework ScreenSaver \
+    -o "$HERE/.build/${SAVER_NAME}" "$HERE/${SAVER_NAME}.swift"
+
+SAVER="$HERE/.build/${SAVER_NAME}.saver"
+rm -rf "$SAVER"
+mkdir -p "$SAVER/Contents/MacOS"
+cp "$HERE/.build/${SAVER_NAME}" "$SAVER/Contents/MacOS/${SAVER_NAME}"
+cat > "$SAVER/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>${APP_NAME}</string>
+  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}.saver</string>
+  <key>CFBundleExecutable</key><string>${SAVER_NAME}</string>
+  <key>CFBundlePackageType</key><string>BNDL</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>NSPrincipalClass</key><string>LoopscapeSaverView</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+</dict>
+</plist>
+PLIST
+codesign --force -s - "$SAVER"
+
 echo "==> assembling bundle"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -65,9 +94,18 @@ PLIST
 codesign --force -s - "$APP"
 
 if [[ $INSTALL -eq 0 ]]; then
+    cp -R "$SAVER" "$DEST/"
     echo "==> built ${APP}"
     exit 0
 fi
+
+echo "==> installing screen saver"
+SAVER_DIR="$HOME/Library/Screen Savers"
+mkdir -p "$SAVER_DIR"
+rm -rf "${SAVER_DIR:?}/${SAVER_NAME}.saver"
+cp -R "$SAVER" "$SAVER_DIR/"
+# legacyScreenSaver keeps loaded modules cached; a restart picks up the new build.
+pkill -f legacyScreenSaver 2>/dev/null || true
 
 # A hand-assembled bundle stays invisible to Spotlight until it is registered.
 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$APP"
