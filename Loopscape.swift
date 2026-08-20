@@ -65,7 +65,11 @@ final class ScreenWallpaper {
         window.contentView = view
         // Below the desktop-icon layer, so icons and Stage Manager stay usable.
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        // .canJoinAllSpaces covers only desktop spaces; without .fullScreenAuxiliary the
+        // window is absent from fullscreen spaces, and every backdrop glimpse there
+        // (transitions, Split View gaps, menu bar reveal) shows the static poster instead.
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle,
+                                     .fullScreenAuxiliary]
         window.ignoresMouseEvents = true
         window.isOpaque = true
         window.backgroundColor = .black
@@ -87,6 +91,10 @@ final class ScreenWallpaper {
     }
 
     func pause() { player.pause() }
+
+    /// A desktop-level window is not always carried into a fullscreen space created after
+    /// it was ordered in; re-ordering on every space change makes it show up there too.
+    func raise() { window.orderFrontRegardless() }
 
     func resume() { player.play() }
 
@@ -159,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// system default during the switch animation, where only real wallpapers are drawn.
     /// Repainting on every space change covers each space as soon as it is entered.
     @objc private func spaceChanged() {
+        wallpapers.forEach { $0.raise() }
         if let slug = currentSlug { syncDesktopPicture(slug) }
     }
 
