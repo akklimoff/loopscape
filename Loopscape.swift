@@ -16,6 +16,7 @@ private enum Key {
     static let shuffle = "shuffle"
     static let minutes = "rotateMinutes"
     static let loginAsked = "loginItemDecided"
+    static let paused = "paused"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -111,6 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activity: NSObjectProtocol?
 
     private let defaults = UserDefaults.standard
+
+    private var isPaused: Bool { defaults.bool(forKey: Key.paused) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -335,13 +338,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 syncDesktopPicture(slug)
             }
         } else {
-            wallpapers.forEach { $0.resume() }
+            if !isPaused { wallpapers.forEach { $0.resume() } }
         }
     }
 
+    /// Every path that (re)creates windows starts them playing, so a paused session must
+    /// be re-frozen here or a display replug and launch would quietly resume it.
     private func startPlayback(_ slug: String) {
         let target = url(for: slug)
         for wallpaper in wallpapers { wallpaper.play(target) }
+        if isPaused { wallpapers.forEach { $0.pause() } }
     }
 
     private func applySelection(_ slug: String) {
@@ -359,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer = nil
         let minutes = defaults.integer(forKey: Key.minutes)
         let shuffling = defaults.bool(forKey: Key.shuffle)
-        guard shuffling, minutes > 0, packs.count > 1,
+        guard shuffling, minutes > 0, packs.count > 1, !isPaused,
               defaults.string(forKey: Key.pinned) == nil else {
             if let token = activity { ProcessInfo.processInfo.endActivity(token) }
             activity = nil
@@ -496,6 +502,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         next.target = self
         menu.addItem(next)
 
+        let pause = NSMenuItem(title: isPaused ? Lang.t("Resume", "Продолжить")
+                                               : Lang.t("Pause", "Пауза"),
+                               action: #selector(togglePause), keyEquivalent: "")
+        pause.target = self
+        pause.state = isPaused ? .on : .off
+        menu.addItem(pause)
+
         menu.addItem(revealItem())
         menu.addItem(loginItem())
         menu.addItem(.separator())
@@ -550,6 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// countdown starts over; pinning is what the shuffle toggle's off state is for.
     @objc private func choosePack(_ sender: NSMenuItem) {
         guard let slug = sender.representedObject as? String else { return }
+        defaults.set(false, forKey: Key.paused)
         let shuffling = defaults.string(forKey: Key.pinned) == nil && defaults.bool(forKey: Key.shuffle)
         if !shuffling {
             defaults.set(slug, forKey: Key.pinned)
@@ -585,8 +599,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshMenu()
     }
 
+    @objc private func togglePause() {
+        defaults.set(!isPaused, forKey: Key.paused)
+        if isPaused {
+            wallpapers.forEach { $0.pause() }
+        } else {
+            wallpapers.forEach { $0.resume() }
+        }
+        restartTimer()
+        refreshMenu()
+    }
+
     @objc private func nextPack() {
         guard packs.count > 1 else { return }
+        defaults.set(false, forKey: Key.paused)
+        restartTimer()
         let index = packs.firstIndex { $0.slug == currentSlug } ?? -1
         let slug = packs[(index + 1) % packs.count].slug
         if defaults.string(forKey: Key.pinned) != nil {
