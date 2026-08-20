@@ -279,7 +279,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !NSScreen.screens.isEmpty else { return }
         guard NSScreen.screens.map({ $0.frame }) != lastFrames else { return }
         rebuildScreens()
-        if let slug = currentSlug { startPlayback(slug) }
+        if let slug = currentSlug {
+            startPlayback(slug)
+            // A display attached after the last pack switch still shows the default system
+            // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
+            // the video — repaint the still on every geometry change, not just on switch.
+            syncDesktopPicture(slug)
+        }
     }
 
     @objc private func screensDidSleep() {
@@ -289,7 +295,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func screensDidWake() {
         if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
             rebuildScreens()
-            if let slug = currentSlug { startPlayback(slug) }
+            if let slug = currentSlug {
+                startPlayback(slug)
+                syncDesktopPicture(slug)
+            }
         } else {
             wallpapers.forEach { $0.resume() }
         }
