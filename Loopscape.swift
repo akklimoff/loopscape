@@ -270,10 +270,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - menu
 
+    /// The logo's stacked cards, redrawn at menu bar scale: the artwork itself is colored and
+    /// its card offsets disappear below ~20pt, while the status bar needs a monochrome template
+    /// so macOS can tint it for the light, dark and highlighted states.
+    private func statusIcon() -> NSImage {
+        let side: CGFloat = 18
+        let box: CGFloat = 12
+        let radius: CGFloat = 3
+        let offset: CGFloat = 4.6
+        let gap: CGFloat = 1.4
+        let line: CGFloat = 1.4
+
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.lockFocus()
+
+        let margin = (side - box - offset) / 2
+        let front = NSRect(x: margin + offset, y: margin, width: box, height: box)
+        let back = front.offsetBy(dx: -offset, dy: offset)
+
+        NSColor.black.setStroke()
+        let outline = NSBezierPath(roundedRect: back.insetBy(dx: line / 2, dy: line / 2),
+                                   xRadius: radius, yRadius: radius)
+        outline.lineWidth = line
+        outline.stroke()
+
+        NSGraphicsContext.current?.compositingOperation = .clear
+        NSBezierPath(roundedRect: front.insetBy(dx: -gap, dy: -gap),
+                     xRadius: radius + gap, yRadius: radius + gap).fill()
+
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: front, xRadius: radius, yRadius: radius).fill()
+
+        image.unlockFocus()
+        image.isTemplate = true
+        image.accessibilityDescription = "Loopscape"
+        return image
+    }
+
     private func buildStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "photo.on.rectangle.angled",
-                                    accessibilityDescription: "Loopscape")
+        item.button?.image = statusIcon()
         let menu = NSMenu()
         menu.delegate = self
         // Enabling is driven by refreshMenu, not by AppKit's responder lookup, so the
