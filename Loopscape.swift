@@ -106,6 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentSlug: String?
     private var lastFrames: [NSRect] = []
     private var root = defaultRoot
+    private var posterSlot = false
+    private var posterSlug: String?
+    private var activity: NSObjectProtocol?
 
     private let defaults = UserDefaults.standard
 
@@ -248,15 +251,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The menu bar blurs the *desktop picture*, not the window stack, so a video at
     /// desktop level leaves the old wallpaper showing through the top strip. Painting the
     /// system wallpaper with a still from the same clip makes that strip blend in.
+    ///
+    /// The wallpaper store keeps one record per space and display, and setDesktopImageURL
+    /// reaches only the active space of each screen — a record written when the poster
+    /// lived at another path survives until that space is repainted, and once the old file
+    /// is gone macOS silently falls back to the built-in default wherever the real picture
+    /// is drawn (Exposé, Mission Control, the menu bar strip). Two fixed slot files that
+    /// are overwritten but never deleted keep every stale record pointing at an image that
+    /// exists; alternating slots on each pack switch sidesteps the same-URL set being
+    /// treated as a no-op.
     private func syncDesktopPicture(_ slug: String) {
         guard let still = poster(for: slug) else { return }
+        let fm = FileManager.default
+        if posterSlug != slug {
+            let next = posterURL(slot: !posterSlot)
+            try? fm.removeItem(at: next)
+            guard (try? fm.copyItem(at: still, to: next)) != nil else { return }
+            posterSlot.toggle()
+            posterSlug = slug
+        }
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(posterURL(slot: posterSlot),
+                                                       for: screen, options: options)
         }
+    }
+
+    private func posterURL(slot: Bool) -> URL {
+        root.appendingPathComponent(slot ? "poster-a.jpg" : "poster-b.jpg")
     }
 
     private func pick() -> String {
@@ -335,11 +360,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let minutes = defaults.integer(forKey: Key.minutes)
         let shuffling = defaults.bool(forKey: Key.shuffle)
         guard shuffling, minutes > 0, packs.count > 1,
-              defaults.string(forKey: Key.pinned) == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: Double(minutes) * 60,
-                                     repeats: true) { [weak self] _ in
+              defaults.string(forKey: Key.pinned) == nil else {
+            if let token = activity { ProcessInfo.processInfo.endActivity(token) }
+            activity = nil
+            return
+        }
+        let rotation = Timer(timeInterval: Double(minutes) * 60,
+                             repeats: true) { [weak self] _ in
             guard let self else { return }
             self.applySelection(self.pick())
+        }
+        rotation.tolerance = 30
+        // .common keeps the timer ticking while the status menu is open; App Nap would
+        // otherwise defer a background accessory's timers indefinitely, so hold an
+        // activity for as long as rotation is on.
+        RunLoop.main.add(rotation, forMode: .common)
+        timer = rotation
+        if activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiatedAllowingIdleSystemSleep,
+                reason: "Wallpaper rotation")
         }
     }
 
@@ -506,10 +546,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshMenu()
     }
 
+    /// While shuffle is on, picking a pack means "show this one now" and the rotation
+    /// countdown starts over; pinning is what the shuffle toggle's off state is for.
     @objc private func choosePack(_ sender: NSMenuItem) {
         guard let slug = sender.representedObject as? String else { return }
-        defaults.set(slug, forKey: Key.pinned)
-        defaults.set(false, forKey: Key.shuffle)
+        let shuffling = defaults.string(forKey: Key.pinned) == nil && defaults.bool(forKey: Key.shuffle)
+        if !shuffling {
+            defaults.set(slug, forKey: Key.pinned)
+            defaults.set(false, forKey: Key.shuffle)
+        }
         restartTimer()
         applySelection(slug)
     }
