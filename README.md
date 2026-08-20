@@ -49,9 +49,10 @@ says it is empty until you put something in it — see below.
 
 ## Adding wallpapers
 
-Put your clips in `~/Library/Application Support/Loopscape/videos/` as `<slug>.mp4`, each
-with a still frame beside it as `<slug>.jpg`, then list them in `packs.json` one directory
-up:
+Put your clips in `~/Library/Application Support/Loopscape/videos/` as `<slug>.<ext>` in
+any container AVFoundation can play (`.mp4`, `.mov`, `.m4v`, `.ts`, ...; WebM is not one
+of them), each with a still frame beside it as `<slug>.jpg`/`.jpeg`/`.png`/`.heic`, then
+list them in `packs.json` one directory up:
 
 ```json
 [

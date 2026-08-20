@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import ServiceManagement
+import UniformTypeIdentifiers
 
 private let defaultRoot: URL = {
     let base = FileManager.default
@@ -99,6 +100,7 @@ final class ScreenWallpaper {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var wallpapers: [ScreenWallpaper] = []
     private var packs: [Pack] = []
+    private var videoFiles: [String: URL] = [:]
     private var statusItem: NSStatusItem?
     private var timer: Timer?
     private var currentSlug: String?
@@ -146,17 +148,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - packs
 
+    /// Asking AVFoundation instead of hardcoding extensions means any container the OS can
+    /// decode (mp4, mov, m4v, ts, ...) works, and new ones appear with OS updates for free.
+    private static let playableExtensions: Set<String> = {
+        var extensions: Set<String> = []
+        for type in AVURLAsset.audiovisualTypes() {
+            guard let ut = UTType(type.rawValue), ut.conforms(to: .movie) else { continue }
+            for ext in ut.tags[.filenameExtension] ?? [] { extensions.insert(ext.lowercased()) }
+        }
+        return extensions.isEmpty ? ["mp4", "mov", "m4v"] : extensions
+    }()
+
     private func loadPacks() -> [Pack] {
-        let videos = root.appendingPathComponent("videos")
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: videos.path)) ?? []
-        let slugs = Set(files.filter { $0.hasSuffix(".mp4") }.map { String($0.dropLast(4)) })
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: videosDirectory.path)) ?? []
+        videoFiles = [:]
+        for file in files.sorted() {
+            let url = videosDirectory.appendingPathComponent(file)
+            guard Self.playableExtensions.contains(url.pathExtension.lowercased()) else { continue }
+            let slug = url.deletingPathExtension().lastPathComponent
+            if videoFiles[slug] == nil { videoFiles[slug] = url }
+        }
 
         var known: [String: Pack] = [:]
         if let data = try? Data(contentsOf: root.appendingPathComponent("packs.json")),
            let decoded = try? JSONDecoder().decode([Pack].self, from: data) {
             for pack in decoded { known[pack.slug] = pack }
         }
-        return slugs.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
+        return videoFiles.keys.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
     }
 
     private var videosDirectory: URL { root.appendingPathComponent("videos") }
@@ -172,19 +190,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func url(for slug: String) -> URL {
-        root.appendingPathComponent("videos").appendingPathComponent("\(slug).mp4")
+        videoFiles[slug] ?? videosDirectory.appendingPathComponent("\(slug).mp4")
     }
 
-    private func poster(for slug: String) -> URL {
-        root.appendingPathComponent("videos").appendingPathComponent("\(slug).jpg")
+    private func poster(for slug: String) -> URL? {
+        for ext in ["jpg", "jpeg", "png", "heic"] {
+            let still = videosDirectory.appendingPathComponent("\(slug).\(ext)")
+            if FileManager.default.fileExists(atPath: still.path) { return still }
+        }
+        return nil
     }
 
     /// The menu bar blurs the *desktop picture*, not the window stack, so a video at
     /// desktop level leaves the old wallpaper showing through the top strip. Painting the
     /// system wallpaper with a still from the same clip makes that strip blend in.
     private func syncDesktopPicture(_ slug: String) {
-        let still = poster(for: slug)
-        guard FileManager.default.fileExists(atPath: still.path) else { return }
+        guard let still = poster(for: slug) else { return }
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
