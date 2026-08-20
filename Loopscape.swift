@@ -144,6 +144,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               name: NSWorkspace.screensDidSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(screensDidWake),
                               name: NSWorkspace.screensDidWakeNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(spaceChanged),
+                              name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+    }
+
+    /// Wallpaper is per space and setDesktopImageURL reaches only the active one, so a
+    /// space painted before the last pack switch — or never visited — still shows the
+    /// system default during the switch animation, where only real wallpapers are drawn.
+    /// Repainting on every space change covers each space as soon as it is entered.
+    @objc private func spaceChanged() {
+        if let slug = currentSlug { syncDesktopPicture(slug) }
     }
 
     // MARK: - packs
