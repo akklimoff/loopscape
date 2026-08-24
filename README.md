@@ -94,9 +94,9 @@ The UI is Russian when the system's primary language is Russian, English otherwi
 
 The real lock screen belongs to `loginwindow` and is off-limits to third-party apps, so
 Loopscape gets there the only sanctioned way: a screen saver. `build.sh` installs
-`LoopscapeSaver.saver` into `~/Library/Screen Savers/`; select **Loopscape** in System
-Settings → Screen Saver, then in **Lock Screen** set *Start Screen Saver when inactive*
-to taste. Once the Mac locks and the idle delay passes, the saver plays the same pack the
+`LoopscapeSaver.saver` into `~/Library/Screen Savers/`; in System Settings → **Wallpaper**
+click **Screen Saver…**, pick **Loopscape** and set *Start Screen Saver* to taste in the
+same sheet. Once the Mac locks and the idle delay passes, the saver plays the same pack the
 desktop is showing (random if it cannot tell).
 
 The saver runs inside the sandboxed `legacyScreenSaver` appex, which cannot read the real
