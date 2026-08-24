@@ -98,6 +98,14 @@ final class ScreenWallpaper {
     /// it was ordered in; re-ordering on every space change makes it show up there too.
     func raise() { window.orderFrontRegardless() }
 
+    /// While displays detach and reattach around sleep the window server is free to move
+    /// windows between screens, and the layout can come back identical to the one that
+    /// bypasses a rebuild — so the frame is re-asserted rather than trusted.
+    func align(to screen: NSScreen) {
+        if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
+        window.orderFrontRegardless()
+    }
+
     func resume() { player.play() }
 
     func tearDown() {
@@ -177,8 +185,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// system default during the switch animation, where only real wallpapers are drawn.
     /// Repainting on every space change covers each space as soon as it is entered.
     @objc private func spaceChanged() {
-        wallpapers.forEach { $0.raise() }
+        realign()
         if let slug = currentSlug { syncDesktopPicture(slug) }
+    }
+
+    private func realign() {
+        let screens = NSScreen.screens
+        if screens.count == wallpapers.count {
+            zip(wallpapers, screens).forEach { $0.align(to: $1) }
+        } else {
+            wallpapers.forEach { $0.raise() }
+        }
     }
 
     // MARK: - packs
@@ -346,7 +363,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A display waking up or being unplugged can briefly report no screens; tearing
         // down then would leave nothing to restore once it comes back.
         guard !NSScreen.screens.isEmpty else { return }
-        guard NSScreen.screens.map({ $0.frame }) != lastFrames else { return }
+        guard NSScreen.screens.map({ $0.frame }) != lastFrames else {
+            realign()
+            return
+        }
         rebuildScreens()
         if let slug = currentSlug {
             startPlayback(slug)
@@ -369,6 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 syncDesktopPicture(slug)
             }
         } else {
+            realign()
             if !isPaused { wallpapers.forEach { $0.resume() } }
             // Waking repaints every screen from the wallpaper store; if a record went
             // stale while the displays slept, this is where the default would show.
