@@ -7,6 +7,7 @@ public final class LoopscapeSaverView: ScreenSaverView {
     private let player = AVQueuePlayer()
     private let playerLayer = AVPlayerLayer()
     private var looper: AVPlayerLooper?
+    private var currentClip: URL?
 
     private static let playableExtensions: Set<String> = {
         var extensions: Set<String> = []
@@ -57,10 +58,15 @@ public final class LoopscapeSaverView: ScreenSaverView {
         return dir.appendingPathComponent(clips.randomElement()!)
     }
 
+    /// legacyScreenSaver keeps the view alive between activations, so the clip has to be
+    /// re-picked every start — the desktop may have rotated to another pack in between.
     public override func startAnimation() {
         super.startAnimation()
-        if looper == nil, let url = pickClip() {
+        if let url = pickClip(), url != currentClip {
+            looper = nil
+            player.removeAllItems()
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            currentClip = url
         }
         player.play()
     }
