@@ -17,6 +17,8 @@ private enum Key {
     static let minutes = "rotateMinutes"
     static let loginAsked = "loginItemDecided"
     static let paused = "paused"
+    static let posterSlot = "posterSlot"
+    static let posterSlug = "posterSlug"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -128,6 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if let stored = defaults.string(forKey: Key.root), !stored.isEmpty {
             root = URL(fileURLWithPath: stored)
+        }
+        // Every wallpaper-store record from the previous session points at the slot file
+        // that was active when it ended. Starting the alternation from scratch would make
+        // the first switch overwrite exactly that file with a different image; restoring
+        // the parity keeps the first write in the other slot.
+        posterSlot = defaults.bool(forKey: Key.posterSlot)
+        if FileManager.default.fileExists(atPath: posterURL(slot: posterSlot).path) {
+            posterSlug = defaults.string(forKey: Key.posterSlug)
         }
         if defaults.object(forKey: Key.minutes) == nil { defaults.set(15, forKey: Key.minutes) }
         if defaults.object(forKey: Key.shuffle) == nil { defaults.set(true, forKey: Key.shuffle) }
@@ -275,12 +285,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func syncDesktopPicture(_ slug: String) {
         guard let still = poster(for: slug) else { return }
         let fm = FileManager.default
-        if posterSlug != slug {
+        if posterSlug != slug || !fm.fileExists(atPath: posterURL(slot: posterSlot).path) {
             let next = posterURL(slot: !posterSlot)
-            try? fm.removeItem(at: next)
-            guard (try? fm.copyItem(at: still, to: next)) != nil else { return }
+            // The wallpaper agent can revalidate its records at any moment (login, wake,
+            // Mission Control) and a record whose file is missing is silently rewritten to
+            // the built-in default — so the slot file must never be absent, even between
+            // two of our own filesystem calls. Stage the copy and swap it in atomically.
+            let staged = root.appendingPathComponent("poster-staged.jpg")
+            try? fm.removeItem(at: staged)
+            guard (try? fm.copyItem(at: still, to: staged)) != nil else { return }
+            if fm.fileExists(atPath: next.path) {
+                guard (try? fm.replaceItemAt(next, withItemAt: staged)) != nil else { return }
+            } else {
+                guard (try? fm.moveItem(at: staged, to: next)) != nil else { return }
+            }
             posterSlot.toggle()
             posterSlug = slug
+            defaults.set(posterSlot, forKey: Key.posterSlot)
+            defaults.set(slug, forKey: Key.posterSlug)
         }
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
@@ -348,6 +370,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } else {
             if !isPaused { wallpapers.forEach { $0.resume() } }
+            // Waking repaints every screen from the wallpaper store; if a record went
+            // stale while the displays slept, this is where the default would show.
+            if let slug = currentSlug { syncDesktopPicture(slug) }
         }
     }
 
@@ -614,6 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             wallpapers.forEach { $0.pause() }
         } else {
             wallpapers.forEach { $0.resume() }
+            if let slug = currentSlug { syncDesktopPicture(slug) }
         }
         restartTimer()
         refreshMenu()
