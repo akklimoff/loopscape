@@ -121,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var videoFiles: [String: URL] = [:]
     private var statusItem: NSStatusItem?
     private var timer: Timer?
+    private var libraryWatch: DispatchSourceFileSystemObject?
+    private var libraryReload: DispatchWorkItem?
     private var currentSlug: String?
     private var lastFrames: [NSRect] = []
     private var root = defaultRoot
@@ -162,8 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                  withIntermediateDirectories: true)
 
         buildStatusItem()
-        startIfReady()
-        refreshMenu()
+        reloadLibrary()
+        watchLibrary()
 
         NotificationCenter.default.addObserver(
             self,
@@ -277,14 +279,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         atomically: true, encoding: .utf8)
     }
 
-    /// Runs again whenever the menu opens while empty, so dropping clips in needs no restart.
-    private func startIfReady() {
-        guard wallpapers.isEmpty else { return }
+    /// Re-scans the folder and reconciles the screen with it: clips dropped in start
+    /// playing without a restart, and a clip deleted from under the current pack gives
+    /// way to another one instead of a frozen last frame.
+    private func reloadLibrary() {
         packs = loadPacks()
-        guard !packs.isEmpty else { return }
-        rebuildScreens()
-        applySelection(pick())
-        restartTimer()
+        if packs.isEmpty {
+            wallpapers.forEach { $0.tearDown() }
+            wallpapers = []
+            currentSlug = nil
+        } else if wallpapers.isEmpty {
+            rebuildScreens()
+            applySelection(pick())
+        } else if !packs.contains(where: { $0.slug == currentSlug }) {
+            applySelection(pick())
+        }
+        // Opening the menu must not reset the countdown, so only a stopped timer is touched.
+        if timer == nil || packs.count < 2 { restartTimer() }
+        refreshMenu()
+    }
+
+    /// Finder copies a large clip in many writes; waiting for the burst to settle keeps
+    /// AVPlayer from opening a half-written file.
+    private func watchLibrary() {
+        let descriptor = open(wallpapersDirectory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
+                                                               eventMask: [.write, .rename, .delete],
+                                                               queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.libraryReload?.cancel()
+            let reload = DispatchWorkItem { [weak self] in self?.reloadLibrary() }
+            self.libraryReload = reload
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reload)
+        }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        libraryWatch = source
     }
 
     private func url(for slug: String) -> URL {
@@ -643,8 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        if packs.isEmpty { startIfReady() }
-        refreshMenu()
+        reloadLibrary()
     }
 
     /// With rotation on, picking a pack means "show this one now" and the countdown starts
