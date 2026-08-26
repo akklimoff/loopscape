@@ -36,13 +36,13 @@ public final class LoopscapeSaverView: ScreenSaverView {
     /// container — the app mirrors the clips there as hardlinks. NSHomeDirectory() resolves
     /// to the container in the appex and to the real home in an unsandboxed test host, so
     /// the same path works in both.
-    private var videosDirectory: URL {
+    private var wallpapersDirectory: URL {
         URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/Loopscape/videos")
+            .appendingPathComponent("Library/Application Support/Loopscape/Wallpapers")
     }
 
     private func pickClip() -> URL? {
-        let dir = videosDirectory
+        let dir = wallpapersDirectory
         let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         let clips = files.filter {
             Self.playableExtensions.contains(($0 as NSString).pathExtension.lowercased())

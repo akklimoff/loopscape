@@ -6,7 +6,7 @@ set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
-VERSION="1.2"
+VERSION="1.3"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DEST="/Applications"
@@ -121,7 +121,6 @@ fi
 
 pkill -x "${APP_NAME}" 2>/dev/null || true
 sleep 1
-mkdir -p "$HOME/Library/Application Support/${APP_NAME}/videos"
 open -a "$APP"
 
 echo "==> done, ${APP_NAME} is running from ${APP}"

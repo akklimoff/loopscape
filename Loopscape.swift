@@ -158,7 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // A drag-and-drop install has no setup step, so the folder has to appear on its own
         // or the first launch is a dead end.
-        try? FileManager.default.createDirectory(at: videosDirectory,
+        migrateLegacyVideosFolder()
+        try? FileManager.default.createDirectory(at: wallpapersDirectory,
                                                  withIntermediateDirectories: true)
 
         buildStatusItem()
@@ -212,10 +213,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
 
     private func loadPacks() -> [Pack] {
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: videosDirectory.path)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: wallpapersDirectory.path)) ?? []
         videoFiles = [:]
         for file in files.sorted() {
-            let url = videosDirectory.appendingPathComponent(file)
+            let url = wallpapersDirectory.appendingPathComponent(file)
             guard Self.playableExtensions.contains(url.pathExtension.lowercased()) else { continue }
             let slug = url.deletingPathExtension().lastPathComponent
             if videoFiles[slug] == nil { videoFiles[slug] = url }
@@ -230,16 +231,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return videoFiles.keys.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
     }
 
-    private var videosDirectory: URL { root.appendingPathComponent("videos") }
+    private var wallpapersDirectory: URL { root.appendingPathComponent("Wallpapers") }
+
+    /// Releases up to 1.2 kept the library in "videos"; the mirror inside the saver
+    /// container followed the same name and would otherwise linger as a dead copy.
+    private func migrateLegacyVideosFolder() {
+        let fm = FileManager.default
+        let legacy = root.appendingPathComponent("videos")
+        if fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: wallpapersDirectory.path) {
+            try? fm.moveItem(at: legacy, to: wallpapersDirectory)
+        }
+        try? fm.removeItem(at: Self.saverMirror.deletingLastPathComponent()
+                                .appendingPathComponent("videos"))
+    }
 
     // MARK: - screen saver mirror
 
     private static let saverMirror = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent("Library/Containers/com.apple.ScreenSaver.Engine.legacyScreenSaver")
-        .appendingPathComponent("Data/Library/Application Support/Loopscape/videos")
+        .appendingPathComponent("Data/Library/Application Support/Loopscape/Wallpapers")
 
     /// The companion .saver runs inside the sandboxed legacyScreenSaver appex, which cannot
-    /// see the real videos folder — its home is its own container. Mirror the clips there as
+    /// see the real wallpapers folder — its home is its own container. Mirror the clips there as
     /// hardlinks: same bytes on disk, and library edits reach the saver on the next pack load.
     private func syncSaverMirror() {
         let fm = FileManager.default
@@ -276,15 +289,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func url(for slug: String) -> URL {
-        videoFiles[slug] ?? videosDirectory.appendingPathComponent("\(slug).mp4")
+        videoFiles[slug] ?? wallpapersDirectory.appendingPathComponent("\(slug).mp4")
     }
 
     private func poster(for slug: String) -> URL? {
         for ext in ["jpg", "jpeg", "png", "heic"] {
-            let still = videosDirectory.appendingPathComponent("\(slug).\(ext)")
+            let still = wallpapersDirectory.appendingPathComponent("\(slug).\(ext)")
             if FileManager.default.fileExists(atPath: still.path) { return still }
         }
-        return nil
+        return generatePoster(for: slug)
+    }
+
+    /// A clip dropped in without a still would leave the menu bar strip blurring the old
+    /// wallpaper, so the first frame is extracted once and kept beside the clip.
+    private func generatePoster(for slug: String) -> URL? {
+        guard let clip = videoFiles[slug] else { return nil }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: clip))
+        generator.appliesPreferredTrackTransform = true
+        guard let frame = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
+        // HEVC main10 clips come out as 16-bit frames, which the JPEG encoder rejects.
+        guard let context = CGContext(data: nil, width: frame.width, height: frame.height,
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return nil }
+        context.draw(frame, in: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
+        guard let eightBit = context.makeImage(),
+              let jpeg = NSBitmapImageRep(cgImage: eightBit)
+                  .representation(using: .jpeg, properties: [.compressionFactor: 0.9])
+        else { return nil }
+        let still = wallpapersDirectory.appendingPathComponent("\(slug).jpg")
+        guard (try? jpeg.write(to: still, options: .atomic)) != nil else { return nil }
+        return still
     }
 
     /// The menu bar blurs the *desktop picture*, not the window stack, so a video at
@@ -567,12 +603,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(revealItem())
         menu.addItem(loginItem())
         menu.addItem(.separator())
+        menu.addItem(versionItem())
         menu.addItem(quitItem())
     }
 
     private func appendEmptyState(to menu: NSMenu) {
-        let hint = NSMenuItem(title: Lang.t("No videos yet — drop clips in the folder below",
-                                            "Видео пока нет — положи ролики в папку ниже"),
+        let hint = NSMenuItem(title: Lang.t("No wallpapers yet — drop clips in the folder below",
+                                            "Обоев пока нет — положи ролики в папку ниже"),
                               action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
@@ -580,11 +617,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(loginItem())
         menu.addItem(.separator())
+        menu.addItem(versionItem())
         menu.addItem(quitItem())
     }
 
+    private func versionItem() -> NSMenuItem {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let item = NSMenuItem(title: "Loopscape \(version ?? "dev")", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
     private func revealItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Open videos folder", "Открыть папку с видео"),
+        let item = NSMenuItem(title: Lang.t("Open wallpapers folder", "Открыть папку с обоями"),
                               action: #selector(revealFolder), keyEquivalent: "")
         item.target = self
         return item
@@ -645,10 +690,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let value = sender.representedObject as? Int else { return }
         defaults.set(value, forKey: Key.minutes)
         // Without an interval there is nothing to rotate to, so hold the current pack
-        // instead of letting the next launch pick at random.
-        if value == 0, defaults.string(forKey: Key.pinned) == nil, let slug = currentSlug {
-            defaults.set(slug, forKey: Key.pinned)
+        // instead of letting the next launch pick at random. Picking an interval is the
+        // request to rotate, so it also lifts a pin left by an earlier pack choice.
+        if value == 0 {
+            if defaults.string(forKey: Key.pinned) == nil, let slug = currentSlug {
+                defaults.set(slug, forKey: Key.pinned)
+            }
             defaults.set(false, forKey: Key.shuffle)
+        } else {
+            defaults.removeObject(forKey: Key.pinned)
+            defaults.set(true, forKey: Key.shuffle)
         }
         restartTimer()
         refreshMenu()
@@ -696,7 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func revealFolder() {
-        NSWorkspace.shared.open(videosDirectory)
+        NSWorkspace.shared.open(wallpapersDirectory)
     }
 
     @objc private func quit() {

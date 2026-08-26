@@ -44,15 +44,15 @@ cd loopscape
 Requires Apple Silicon and the Xcode command line tools (`xcode-select --install`).
 `make-dmg.sh` produces the disk image.
 
-Loopscape ships with no videos. The first launch creates the videos folder and the menu
+Loopscape ships with no videos. The first launch creates the wallpapers folder and the menu
 says it is empty until you put something in it — see below.
 
 ## Adding wallpapers
 
-Put your clips in `~/Library/Application Support/Loopscape/videos/` as `<slug>.<ext>` in
+Put your clips in `~/Library/Application Support/Loopscape/Wallpapers/` as `<slug>.<ext>` in
 any container AVFoundation can play (`.mp4`, `.mov`, `.m4v`, `.ts`, ...; WebM is not one
-of them), each with a still frame beside it as `<slug>.jpg`/`.jpeg`/`.png`/`.heic`, then
-list them in `packs.json` one directory up:
+of them), then list them in `packs.json` one directory up (optional — a clip without an
+entry shows up under its slug):
 
 ```json
 [
@@ -67,10 +67,10 @@ HEVC is strongly preferred over VP9 or H.264 — Apple Silicon decodes it in har
 ffmpeg -i input.webm -an \
   -c:v hevc_videotoolbox -profile:v main10 -tag:v hvc1 -pix_fmt p010le \
   -b:v 30M -colorspace bt709 -color_primaries bt709 -color_trc bt709 \
-  "$HOME/Library/Application Support/Loopscape/videos/winter-ruins.mp4"
+  "$HOME/Library/Application Support/Loopscape/Wallpapers/winter-ruins.mp4"
 
 ffmpeg -i input.webm -frames:v 1 -q:v 2 \
-  "$HOME/Library/Application Support/Loopscape/videos/winter-ruins.jpg"
+  "$HOME/Library/Application Support/Loopscape/Wallpapers/winter-ruins.jpg"
 ```
 
 The still is not decoration. The menu bar blurs the *desktop picture* rather than the
@@ -81,9 +81,9 @@ disappears.
 ## Menu
 
 The status item is the entire interface: pick a pack, set the rotation interval (5 / 15 /
-30 / 60 minutes, or off), jump to the next one, open the videos folder, toggle **Launch at
-login**, quit. Choosing a pack pins it; turning the interval off pins whatever is showing,
-so it survives a restart.
+30 / 60 minutes, or off), jump to the next one, open the wallpapers folder, toggle **Launch at
+login**, quit. Choosing a pack while shuffle is off pins it; turning the interval off pins whatever is
+showing, so it survives a restart; picking an interval turns shuffle back on.
 
 Launch at login is on by default and is backed by `SMAppService`, so it shows up in System
 Settings under Login Items. Unchecking it there and in the menu are the same switch.
@@ -100,7 +100,7 @@ same sheet. Once the Mac locks and the idle delay passes, the saver plays the sa
 desktop is showing (random if it cannot tell).
 
 The saver runs inside the sandboxed `legacyScreenSaver` appex, which cannot read the real
-videos folder — the app mirrors the clips into the appex container as hardlinks (no extra
+wallpapers folder — the app mirrors the clips into the appex container as hardlinks (no extra
 disk) on every pack load and records the current pack in `current.txt` there.
 
 ## Notes
