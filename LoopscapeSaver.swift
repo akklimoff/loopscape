@@ -32,14 +32,16 @@ public final class LoopscapeSaverView: ScreenSaverView {
 
     public required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// The saver runs inside the sandboxed legacyScreenSaver appex, whose home is its own
-    /// container — the app mirrors the clips there as hardlinks. NSHomeDirectory() resolves
-    /// to the container in the appex and to the real home in an unsandboxed test host, so
-    /// the same path works in both.
-    private var wallpapersDirectory: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/Loopscape/Wallpapers")
-    }
+    /// Inside the sandboxed legacyScreenSaver appex NSHomeDirectory() is the container,
+    /// not the user's home; the passwd entry gives the real one. The appex is entitled to
+    /// read the whole disk, so the app's folder is reachable directly.
+    private static let root: URL = {
+        let home = getpwuid(getuid()).flatMap { String(validatingUTF8: $0.pointee.pw_dir) }
+            ?? NSHomeDirectory()
+        return URL(fileURLWithPath: home).appendingPathComponent("Library/Application Support/Loopscape")
+    }()
+
+    private var wallpapersDirectory: URL { Self.root.appendingPathComponent("Wallpapers") }
 
     private func pickClip() -> URL? {
         let dir = wallpapersDirectory
@@ -48,7 +50,7 @@ public final class LoopscapeSaverView: ScreenSaverView {
             Self.playableExtensions.contains(($0 as NSString).pathExtension.lowercased())
         }.sorted()
         guard !clips.isEmpty else { return nil }
-        let current = (try? String(contentsOf: dir.appendingPathComponent("current.txt"),
+        let current = (try? String(contentsOf: Self.root.appendingPathComponent("current.txt"),
                                    encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let current,

@@ -99,9 +99,9 @@ click **Screen Saver…**, pick **Loopscape** and set *Start Screen Saver* to ta
 same sheet. Once the Mac locks and the idle delay passes, the saver plays the same pack the
 desktop is showing (random if it cannot tell).
 
-The saver runs inside the sandboxed `legacyScreenSaver` appex, which cannot read the real
-wallpapers folder — the app mirrors the clips into the appex container as hardlinks (no extra
-disk) on every pack load and records the current pack in `current.txt` there.
+The saver runs inside the sandboxed `legacyScreenSaver` appex, which is entitled to read
+the whole disk, so it plays straight from the wallpapers folder; the app records the current
+pack in `current.txt` one directory up.
 
 ## Notes
 
