@@ -13,7 +13,6 @@ private let defaultRoot: URL = {
 private enum Key {
     static let root = "videosRoot"
     static let pinned = "pinnedSlug"
-    static let shuffle = "shuffle"
     static let minutes = "rotateMinutes"
     static let loginAsked = "loginItemDecided"
     static let paused = "paused"
@@ -127,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var root = defaultRoot
     private var posterSlot = false
     private var posterSlug: String?
+    private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
 
     private let defaults = UserDefaults.standard
@@ -148,7 +148,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             posterSlug = defaults.string(forKey: Key.posterSlug)
         }
         if defaults.object(forKey: Key.minutes) == nil { defaults.set(15, forKey: Key.minutes) }
-        if defaults.object(forKey: Key.shuffle) == nil { defaults.set(true, forKey: Key.shuffle) }
         // A wallpaper that vanishes after a reboot is useless, so opt in once and let the
         // menu switch it off afterwards.
         if defaults.object(forKey: Key.loginAsked) == nil {
@@ -301,9 +300,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// A clip dropped in without a still would leave the menu bar strip blurring the old
-    /// wallpaper, so the first frame is extracted once and kept beside the clip.
+    /// wallpaper, so the first frame is extracted once and kept beside the clip. A clip
+    /// that yields no frame is remembered: the sync runs on every space change, and a
+    /// failed 4K decode on the main thread each time would make switching desktops lag.
     private func generatePoster(for slug: String) -> URL? {
-        guard let clip = videoFiles[slug] else { return nil }
+        guard let clip = videoFiles[slug], !unposterable.contains(slug) else { return nil }
+        defer { if !FileManager.default.fileExists(atPath: posterPath(slug)) { unposterable.insert(slug) } }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: clip))
         generator.appliesPreferredTrackTransform = true
         guard let frame = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
@@ -318,9 +320,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let jpeg = NSBitmapImageRep(cgImage: eightBit)
                   .representation(using: .jpeg, properties: [.compressionFactor: 0.9])
         else { return nil }
-        let still = wallpapersDirectory.appendingPathComponent("\(slug).jpg")
+        let still = URL(fileURLWithPath: posterPath(slug))
         guard (try? jpeg.write(to: still, options: .atomic)) != nil else { return nil }
         return still
+    }
+
+    private func posterPath(_ slug: String) -> String {
+        wallpapersDirectory.appendingPathComponent("\(slug).jpg").path
     }
 
     /// The menu bar blurs the *desktop picture*, not the window stack, so a video at
@@ -443,6 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applySelection(_ slug: String) {
         currentSlug = slug
+        rememberPin(slug)
         startPlayback(slug)
         syncDesktopPicture(slug)
         markCurrentForSaver(slug)
@@ -455,9 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer?.invalidate()
         timer = nil
         let minutes = defaults.integer(forKey: Key.minutes)
-        let shuffling = defaults.bool(forKey: Key.shuffle)
-        guard shuffling, minutes > 0, packs.count > 1, !isPaused,
-              defaults.string(forKey: Key.pinned) == nil else {
+        guard minutes > 0, packs.count > 1, !isPaused else {
             if let token = activity { ProcessInfo.processInfo.endActivity(token) }
             activity = nil
             return
@@ -525,8 +530,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.button?.image = statusIcon()
         let menu = NSMenu()
         menu.delegate = self
-        // Enabling is driven by refreshMenu, not by AppKit's responder lookup, so the
-        // shuffle row can be greyed out while its action target is still wired up.
         menu.autoenablesItems = false
         item.menu = menu
         statusItem = item
@@ -541,33 +544,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        let pinned = defaults.string(forKey: Key.pinned)
+        let minutes = defaults.integer(forKey: Key.minutes)
         for pack in packs {
             let item = NSMenuItem(title: pack.title,
                                   action: #selector(choosePack(_:)),
                                   keyEquivalent: "")
             item.target = self
             item.representedObject = pack.slug
-            if pinned == pack.slug {
-                item.state = .on
-            } else if pinned == nil, pack.slug == currentSlug {
-                item.state = .mixed
-            }
+            if pack.slug == currentSlug { item.state = minutes > 0 ? .mixed : .on }
             menu.addItem(item)
         }
 
         menu.addItem(.separator())
-
-        let minutes = defaults.integer(forKey: Key.minutes)
-        let shuffle = NSMenuItem(title: minutes > 0
-                                    ? Lang.t("Shuffle every \(minutes) min", "Листать все, каждые \(minutes) мин")
-                                    : Lang.t("Shuffle — interval off", "Листать все — интервал выключен"),
-                                 action: #selector(toggleShuffle),
-                                 keyEquivalent: "")
-        shuffle.target = self
-        shuffle.state = (pinned == nil && defaults.bool(forKey: Key.shuffle)) ? .on : .off
-        shuffle.isEnabled = minutes > 0
-        menu.addItem(shuffle)
 
         let intervals = NSMenuItem(title: Lang.t("Interval", "Интервал"), action: nil, keyEquivalent: "")
         let submenu = NSMenu()
@@ -659,50 +647,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshMenu()
     }
 
-    /// While shuffle is on, picking a pack means "show this one now" and the rotation
-    /// countdown starts over; pinning is what the shuffle toggle's off state is for.
+    /// With rotation on, picking a pack means "show this one now" and the countdown starts
+    /// over; with the interval off it is the pack that survives the next launch.
     @objc private func choosePack(_ sender: NSMenuItem) {
         guard let slug = sender.representedObject as? String else { return }
         defaults.set(false, forKey: Key.paused)
-        let shuffling = defaults.string(forKey: Key.pinned) == nil && defaults.bool(forKey: Key.shuffle)
-        if !shuffling {
-            defaults.set(slug, forKey: Key.pinned)
-            defaults.set(false, forKey: Key.shuffle)
-        }
         restartTimer()
         applySelection(slug)
-    }
-
-    @objc private func toggleShuffle() {
-        let enabling = !(defaults.string(forKey: Key.pinned) == nil && defaults.bool(forKey: Key.shuffle))
-        if enabling {
-            defaults.removeObject(forKey: Key.pinned)
-            defaults.set(true, forKey: Key.shuffle)
-        } else {
-            defaults.set(false, forKey: Key.shuffle)
-            if let slug = currentSlug { defaults.set(slug, forKey: Key.pinned) }
-        }
-        restartTimer()
-        refreshMenu()
     }
 
     @objc private func setInterval(_ sender: NSMenuItem) {
         guard let value = sender.representedObject as? Int else { return }
         defaults.set(value, forKey: Key.minutes)
-        // Without an interval there is nothing to rotate to, so hold the current pack
-        // instead of letting the next launch pick at random. Picking an interval is the
-        // request to rotate, so it also lifts a pin left by an earlier pack choice.
-        if value == 0 {
-            if defaults.string(forKey: Key.pinned) == nil, let slug = currentSlug {
-                defaults.set(slug, forKey: Key.pinned)
-            }
-            defaults.set(false, forKey: Key.shuffle)
-        } else {
-            defaults.removeObject(forKey: Key.pinned)
-            defaults.set(true, forKey: Key.shuffle)
-        }
         restartTimer()
+        if let slug = currentSlug { rememberPin(slug) }
         refreshMenu()
+    }
+
+    /// Without an interval there is nothing to rotate to, so the pack on screen is held
+    /// across launches instead of letting the next one pick at random.
+    private func rememberPin(_ slug: String) {
+        if defaults.integer(forKey: Key.minutes) > 0 {
+            defaults.removeObject(forKey: Key.pinned)
+        } else {
+            defaults.set(slug, forKey: Key.pinned)
+        }
     }
 
     @objc private func togglePause() {
@@ -722,11 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(false, forKey: Key.paused)
         restartTimer()
         let index = packs.firstIndex { $0.slug == currentSlug } ?? -1
-        let slug = packs[(index + 1) % packs.count].slug
-        if defaults.string(forKey: Key.pinned) != nil {
-            defaults.set(slug, forKey: Key.pinned)
-        }
-        applySelection(slug)
+        applySelection(packs[(index + 1) % packs.count].slug)
     }
 
     @objc private func toggleLoginItem() {

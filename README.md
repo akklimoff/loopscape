@@ -82,8 +82,8 @@ disappears.
 
 The status item is the entire interface: pick a pack, set the rotation interval (5 / 15 /
 30 / 60 minutes, or off), jump to the next one, open the wallpapers folder, toggle **Launch at
-login**, quit. Choosing a pack while shuffle is off pins it; turning the interval off pins whatever is
-showing, so it survives a restart; picking an interval turns shuffle back on.
+login**, quit. With an interval set, choosing a pack shows it now and restarts the countdown; with the
+interval off, whatever is showing is kept across restarts.
 
 Launch at login is on by default and is backed by `SMAppService`, so it shows up in System
 Settings under Login Items. Unchecking it there and in the menu are the same switch.
