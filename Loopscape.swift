@@ -16,8 +16,6 @@ private enum Key {
     static let minutes = "rotateMinutes"
     static let loginAsked = "loginItemDecided"
     static let paused = "paused"
-    static let posterSlot = "posterSlot"
-    static let posterSlug = "posterSlug"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -126,8 +124,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentSlug: String?
     private var lastFrames: [NSRect] = []
     private var root = defaultRoot
-    private var posterSlot = false
-    private var posterSlug: String?
     private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
 
@@ -140,14 +136,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if let stored = defaults.string(forKey: Key.root), !stored.isEmpty {
             root = URL(fileURLWithPath: stored)
-        }
-        // Every wallpaper-store record from the previous session points at the slot file
-        // that was active when it ended. Starting the alternation from scratch would make
-        // the first switch overwrite exactly that file with a different image; restoring
-        // the parity keeps the first write in the other slot.
-        posterSlot = defaults.bool(forKey: Key.posterSlot)
-        if FileManager.default.fileExists(atPath: posterURL(slot: posterSlot).path) {
-            posterSlug = defaults.string(forKey: Key.posterSlug)
         }
         if defaults.object(forKey: Key.minutes) == nil { defaults.set(15, forKey: Key.minutes) }
         // A wallpaper that vanishes after a reboot is useless, so opt in once and let the
@@ -284,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// way to another one instead of a frozen last frame.
     private func reloadLibrary() {
         packs = loadPacks()
+        unposterable = []
         if packs.isEmpty {
             wallpapers.forEach { $0.tearDown() }
             wallpapers = []
@@ -365,53 +354,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// desktop level leaves the old wallpaper showing through the top strip. Painting the
     /// system wallpaper with a still from the same clip makes that strip blend in.
     ///
-    /// The wallpaper store keeps one record per space and display, and setDesktopImageURL
-    /// reaches only the active space of each screen — a record written when the poster
-    /// lived at another path survives until that space is repainted, and once the old file
-    /// is gone macOS silently falls back to the built-in default wherever the real picture
-    /// is drawn (Exposé, Mission Control, the menu bar strip). Two fixed slot files that
-    /// are overwritten but never deleted keep every stale record pointing at an image that
-    /// exists; alternating slots on each pack switch sidesteps the same-URL set being
-    /// treated as a no-op.
+    /// The wallpaper agent caches decoded pictures per display by URL and ignores the
+    /// file changing underneath — a fixed slot file rewritten on every switch left one
+    /// display showing the previous still. Every clip's still is therefore set under its
+    /// own, never-rewritten URL. setDesktopImageURL reaches only the active space of each
+    /// screen; spaceChanged repaints the others as they are entered.
     private func syncDesktopPicture(_ slug: String) {
         guard let still = poster(for: slug) else { return }
-        let fm = FileManager.default
-        if posterSlug != slug || !fm.fileExists(atPath: posterURL(slot: posterSlot).path) {
-            let next = posterURL(slot: !posterSlot)
-            // The wallpaper agent can revalidate its records at any moment (login, wake,
-            // Mission Control) and a record whose file is missing is silently rewritten to
-            // the built-in default — so the slot file must never be absent, even between
-            // two of our own filesystem calls. Stage the copy and swap it in atomically.
-            let staged = root.appendingPathComponent("poster-staged.jpg")
-            try? fm.removeItem(at: staged)
-            guard (try? fm.copyItem(at: still, to: staged)) != nil else { return }
-            if fm.fileExists(atPath: next.path) {
-                // Without this option the swapped-in file inherits the old modification
-                // date; the wallpaper agent caches decoded images by URL and date, so a
-                // display that had this slot cached keeps showing the previous still.
-                guard (try? fm.replaceItemAt(next, withItemAt: staged,
-                                             options: .usingNewMetadataOnly)) != nil else { return }
-            } else {
-                guard (try? fm.moveItem(at: staged, to: next)) != nil else { return }
-            }
-            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: next.path)
-            posterSlot.toggle()
-            posterSlug = slug
-            defaults.set(posterSlot, forKey: Key.posterSlot)
-            defaults.set(slug, forKey: Key.posterSlug)
-        }
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(posterURL(slot: posterSlot),
-                                                       for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
         }
-    }
-
-    private func posterURL(slot: Bool) -> URL {
-        root.appendingPathComponent(slot ? "poster-a.jpg" : "poster-b.jpg")
     }
 
     private func pick() -> String {
