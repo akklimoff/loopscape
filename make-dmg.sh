@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="Loopscape"
-VERSION="1.4"
+VERSION="1.5"
 VOLUME="${APP_NAME} ${VERSION}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAGE="$HERE/.build/dmg"
