@@ -120,7 +120,8 @@ if [[ -f "$LEGACY_AGENT" ]]; then
 fi
 
 pkill -x "${APP_NAME}" 2>/dev/null || true
-sleep 1
+# The new instance exits if it still sees the old one, so wait for it to be gone.
+while pgrep -x "${APP_NAME}" >/dev/null; do sleep 0.2; done
 open -a "$APP"
 
 echo "==> done, ${APP_NAME} is running from ${APP}"

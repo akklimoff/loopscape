@@ -386,10 +386,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? fm.removeItem(at: staged)
             guard (try? fm.copyItem(at: still, to: staged)) != nil else { return }
             if fm.fileExists(atPath: next.path) {
-                guard (try? fm.replaceItemAt(next, withItemAt: staged)) != nil else { return }
+                // Without this option the swapped-in file inherits the old modification
+                // date; the wallpaper agent caches decoded images by URL and date, so a
+                // display that had this slot cached keeps showing the previous still.
+                guard (try? fm.replaceItemAt(next, withItemAt: staged,
+                                             options: .usingNewMetadataOnly)) != nil else { return }
             } else {
                 guard (try? fm.moveItem(at: staged, to: next)) != nil else { return }
             }
+            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: next.path)
             posterSlot.toggle()
             posterSlug = slug
             defaults.set(posterSlot, forKey: Key.posterSlot)
