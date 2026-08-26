@@ -6,7 +6,7 @@ set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
-VERSION="1.5"
+VERSION="1.6"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DEST="/Applications"
