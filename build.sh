@@ -2,12 +2,22 @@
 # Usage:
 #   ./build.sh              build, install to /Applications and launch
 #   ./build.sh --dest DIR   build the bundle into DIR and stop (used by make-dmg.sh)
+#   ./build.sh --test       build and run the unit tests, touch nothing else
 set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
 VERSION="1.6"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == "--test" ]]; then
+    mkdir -p "$HERE/.build"
+    echo "==> compiling tests"
+    swiftc -swift-version 5 -target arm64-apple-macosx13.0 \
+        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE"/Tests/*.swift
+    "$HERE/.build/tests" "$HERE/Tests/Fixtures"
+    exit 0
+fi
 
 DEST="/Applications"
 INSTALL=1
