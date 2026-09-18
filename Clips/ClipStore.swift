@@ -10,41 +10,39 @@ final class ClipStore {
 
     static let missLifetime: TimeInterval = 30 * 24 * 3600
 
-    private struct Record: Codable {
-        var video: String?
-        var checked: Date
-    }
-
     private let file: URL
     private let now: () -> Date
-    private var records: [String: Record] = [:]
 
     init(file: URL, now: @escaping () -> Date = Date.init) {
         self.file = file
         self.now = now
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let data = try? Data(contentsOf: file),
-           let decoded = try? decoder.decode([String: Record].self, from: data) {
-            records = decoded
-        }
     }
 
     func lookup(_ trackID: String) -> Entry? {
-        guard let record = records[trackID] else { return nil }
-        if let video = record.video { return .video(video) }
-        return now().timeIntervalSince(record.checked) < Self.missLifetime ? Entry.none : nil
+        guard let record = load()[trackID] as? [String: Any] else { return nil }
+        if let video = record["video"] as? String, !video.isEmpty { return .video(video) }
+        guard let stamp = record["checked"] as? String,
+              let checked = ISO8601DateFormatter().date(from: stamp) else { return nil }
+        return now().timeIntervalSince(checked) < Self.missLifetime ? Entry.none : nil
     }
 
     func record(_ entry: Entry, for trackID: String) {
-        switch entry {
-        case .video(let id): records[trackID] = Record(video: id, checked: now())
-        case .none: records[trackID] = Record(video: nil, checked: now())
-        }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(records) else { return }
+        var records = load()
+        var record: [String: Any] = ["checked": ISO8601DateFormatter().string(from: now())]
+        if case .video(let id) = entry { record["video"] = id }
+        records[trackID] = record
+        // A lost write costs one repeated search, so failures are not surfaced.
+        guard let data = try? JSONSerialization.data(withJSONObject: records,
+                                                     options: [.prettyPrinted, .sortedKeys]) else { return }
         try? data.write(to: file, options: .atomic)
+    }
+
+    /// Read afresh on every access: the file doubles as the manual override and the app runs
+    /// for days, so an edit made meanwhile must take effect and must not be overwritten.
+    /// Kept as raw JSON so an entry this version cannot read is written back untouched.
+    private func load() -> [String: Any] {
+        guard let data = try? Data(contentsOf: file),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return root
     }
 }

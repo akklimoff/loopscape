@@ -43,4 +43,41 @@ func storeTests() {
         store.record(.video("v"), for: "a")
         expectEqual(ClipStore(file: file).lookup("a"), .video("v"))
     }
+
+    test("one malformed entry does not take the others down, and survives a write") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let edited = #"""
+        {
+          "pinned": { "video": "dQw4w9WgXcQ" },
+          "broken": { "video": 5, "checked": "yesterday" },
+          "miss-without-date": {}
+        }
+        """#
+        try Data(edited.utf8).write(to: file)
+        let store = ClipStore(file: file)
+        expectEqual(store.lookup("pinned"), .video("dQw4w9WgXcQ"))
+        expectEqual(store.lookup("broken"), nil)
+        expectEqual(store.lookup("miss-without-date"), nil)
+
+        store.record(.video("v"), for: "new")
+        let reopened = ClipStore(file: file)
+        expectEqual(reopened.lookup("pinned"), .video("dQw4w9WgXcQ"))
+        expectEqual(reopened.lookup("new"), .video("v"))
+        let raw = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+        expect(raw.contains("\"broken\""), "the entry that could not be read was dropped from the file")
+    }
+
+    test("an edit made while the store is open is honoured and survives the next write") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let store = ClipStore(file: file)
+        store.record(.video("found"), for: "a")
+
+        let pinned = #"{ "a": { "video": "pinned" } }"#
+        try Data(pinned.utf8).write(to: file)
+        expectEqual(store.lookup("a"), .video("pinned"))
+
+        store.record(.none, for: "b")
+        expectEqual(ClipStore(file: file).lookup("a"), .video("pinned"))
+        expectEqual(ClipStore(file: file).lookup("b"), ClipStore.Entry.none)
+    }
 }
