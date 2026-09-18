@@ -1,0 +1,46 @@
+import Foundation
+
+func storeTests() {
+    test("store round-trips videos and misses through the file") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let store = ClipStore(file: file)
+        expectEqual(store.lookup("a"), nil)
+        store.record(.video("AtKMvNUEPMM"), for: "a")
+        store.record(.none, for: "b")
+
+        let reopened = ClipStore(file: file)
+        expectEqual(reopened.lookup("a"), .video("AtKMvNUEPMM"))
+        expectEqual(reopened.lookup("b"), ClipStore.Entry.none)
+        expectEqual(reopened.lookup("c"), nil)
+    }
+
+    test("a miss lapses after 30 days, a video never does") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = ClipStore(file: file, now: { clock })
+        store.record(.video("v"), for: "a")
+        store.record(.none, for: "b")
+
+        clock += 29 * 24 * 3600
+        expectEqual(store.lookup("b"), ClipStore.Entry.none)
+        clock += 2 * 24 * 3600
+        expectEqual(store.lookup("b"), nil)
+        expectEqual(store.lookup("a"), .video("v"))
+    }
+
+    test("a hand-edited file without dates' precision still loads") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let edited = #"{ "spotify:track:1": { "video": "dQw4w9WgXcQ", "checked": "2026-09-18T00:00:00Z" } }"#
+        try Data(edited.utf8).write(to: file)
+        expectEqual(ClipStore(file: file).lookup("spotify:track:1"), .video("dQw4w9WgXcQ"))
+    }
+
+    test("a corrupt file starts empty instead of crashing") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        try Data("not json".utf8).write(to: file)
+        let store = ClipStore(file: file)
+        expectEqual(store.lookup("a"), nil)
+        store.record(.video("v"), for: "a")
+        expectEqual(ClipStore(file: file).lookup("a"), .video("v"))
+    }
+}
