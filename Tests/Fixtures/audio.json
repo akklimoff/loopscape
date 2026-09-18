@@ -1,0 +1,42 @@
+{
+  "artist": "LSD",
+  "name": "Audio (feat. Sia, Diplo & Labrinth)",
+  "seconds": 191,
+  "candidates": [
+    {
+      "id": "tjA7nAHOAww",
+      "title": "LSD - Audio (Official Video) ft. Sia, Diplo, Labrinth",
+      "channel": "Sia",
+      "duration": 226,
+      "channel_is_verified": true
+    },
+    {
+      "id": "HhoATZ1Imtw",
+      "title": "LSD - Genius ft. Sia, Diplo, Labrinth",
+      "channel": "Sia",
+      "duration": 223,
+      "channel_is_verified": true
+    },
+    {
+      "id": "bXwJHdpwtvs",
+      "title": "LSD - Audio (Official Video) ft. Labrinth, Sia, Diplo",
+      "channel": "Diplo",
+      "duration": 235,
+      "channel_is_verified": true
+    },
+    {
+      "id": "kg1BljLu9YY",
+      "title": "LSD - Thunderclouds (Official Video) ft. Sia, Diplo, Labrinth",
+      "channel": "Sia",
+      "duration": 196,
+      "channel_is_verified": true
+    },
+    {
+      "id": "bxYhJpILIQE",
+      "title": "Will Sparks & New World Sound - LSD (Official Music Video)",
+      "channel": "Spinnin' Records",
+      "duration": 296,
+      "channel_is_verified": true
+    }
+  ]
+}

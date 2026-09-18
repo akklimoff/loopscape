@@ -1,0 +1,42 @@
+{
+  "artist": "Кино",
+  "name": "Группа крови",
+  "seconds": 285,
+  "candidates": [
+    {
+      "id": "RcQuuvMHbOM",
+      "title": "Виктор Цой - Группа Крови",
+      "channel": "Sergei Dmitrijev",
+      "duration": 233,
+      "channel_is_verified": null
+    },
+    {
+      "id": "MTJhfySLSCQ",
+      "title": "КИНО - Группа Крови (rare) | (VIKTOR TSOI CAM) eng/france SUBTITLES May 05 | 1990",
+      "channel": "Тимур Баширов ",
+      "duration": 306,
+      "channel_is_verified": null
+    },
+    {
+      "id": "MAn_WoXZ-hk",
+      "title": "КИНО - Группа крови [Official Video] Клип HD @ХитЗаХитом",
+      "channel": "ХИТ ЗА ХИТОМ!",
+      "duration": 254,
+      "channel_is_verified": true
+    },
+    {
+      "id": "6i7zxpbOcaI",
+      "title": "КИНО || ГРУППА КРОВИ",
+      "channel": "mrPhakel",
+      "duration": 240,
+      "channel_is_verified": null
+    },
+    {
+      "id": "6C2ti3x9OAA",
+      "title": "Виктор Цой \"Группа крови\"",
+      "channel": "Columnsl",
+      "duration": 241,
+      "channel_is_verified": null
+    }
+  ]
+}

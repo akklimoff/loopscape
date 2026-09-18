@@ -1,0 +1,239 @@
+# Spotify clips — design
+
+Date: 2026-09-18. Status: approved split, Part 0 still open. Part 2 plan:
+`docs/superpowers/plans/2026-09-18-clip-resolver.md`.
+
+## Goal
+
+While the Spotify desktop client plays a track, Loopscape shows that track's music video as
+the wallpaper on every display. When nothing plays, or the track has no video, Loopscape
+behaves exactly as it does today.
+
+## Decisions
+
+- **Clip source: YouTube only**, resolved through `yt-dlp`. No hand-curated clips, no Spotify
+  Canvas (unofficial endpoint, vertical 720p), no Spotify music videos (DRM).
+- **Delivery: stream, do not download.** YouTube exposes each video as HLS, which `AVPlayer`
+  plays natively. Video data lives only in AVPlayer's RAM buffer.
+- **On disk: only the track → video mapping**, including "this track has no video".
+- **`yt-dlp` is an external dependency** the user installs (`brew install yt-dlp`); it is not
+  bundled. The standalone binary takes ~16 s to start, the Homebrew one under a second.
+- **No video found → normal rotation continues.** The feature never leaves a black or frozen
+  screen; every failure path ends at the regular packs.
+
+Downloading or streaming through `yt-dlp` is against YouTube's terms of service. The README
+must say so; the feature ships switched off.
+
+## Versioning
+
+This feature opens the **2.x** line; 1.6 is the last release without it.
+
+| Version | Contents |
+|---|---|
+| 1.x | Fixes to existing behaviour only, if any are needed while 2.0 is in progress |
+| 2.0 | Parts 1–4 complete: the first release in which a playing track switches the wallpaper |
+| 2.1, 2.2, … | Follow-ups from "Out of scope", one release per item that proves necessary |
+
+Parts 1–3 land on `main` without a release of their own — Parts 2 and 3 change nothing a
+user can see, so a DMG for them would be noise. `VERSION` in `build.sh` and `make-dmg.sh`
+moves to `2.0` with the first commit that changes the app binary (Part 1 or Part 3,
+whichever lands first; Part 2 adds no code to the app), so the version line in the menu
+tells a development build from the installed 1.6; the `v2.0` tag and DMG are cut only after
+the Part 4 scenario run passes.
+
+## Spike measurements
+
+Taken on this machine (M1 Max, macOS 26.6.2, yt-dlp 2026.08.19, Python 3.13) with one video,
+`CCHdMIEGaaM`:
+
+| What | Result |
+|---|---|
+| Flat search, 5 candidates (`--flat-playlist -J`) | 2.6 s |
+| Resolve HLS URL for a known video id | 2.8–4.4 s |
+| Prototype resolver end to end: unknown track / mapped track / same session | 7.5 s / 4.4 s / 0 s |
+| HLS (format 270, 1080p avc1): first frame in `AVPlayer` | 1.05 s |
+| HLS: playing again after seek to 120 s | 0.7 s |
+| HLS: duration reported by AVFoundation | 247.7 s, correct |
+| Direct https DASH URL (format 137): first frame | 14.5 s |
+| Direct https DASH URL / downloaded file: duration | 495.4 s, doubled; `ffmpeg -c copy` fixes a file |
+| AVPlayer forward buffer while streaming | ~7 s |
+
+Consequences: HLS is the only variant worth building. H.264 ≤ 1080p is the format — M1 has no
+AV1 hardware decoder and AVFoundation does not play VP9. 1080p HLS runs at ~4.7 Mbit/s, about
+140 MB per clip and per loop, per display.
+
+Search ranking is the weak spot, not the plumbing: for "Daft Punk Get Lucky official video"
+the first hit is a third-party re-upload and the second is "Official Audio" (a static cover).
+Ranking needs every candidate's title, channel and duration, so a resolve is two `yt-dlp`
+runs — a flat search, then the stream URL of the pick — not one.
+
+Old clips are small. МакSим — «Лучшая ночь» (2007) exists natively at 320×240; YouTube's
+"super resolution" upscales of it are AV1/VP9 DASH only, which AVFoundation on M1 cannot
+play. Stretched over a desktop that is worse than no clip, hence a minimum height.
+
+`yt-dlp` wants a JavaScript runtime for YouTube and warns that running without one is
+deprecated and hides formats. Homebrew's formula depends on `deno`, so the runtime is there
+— but only if the child process gets a `PATH` that includes the Homebrew prefix.
+
+**Not verified:** that Spotify 1.2.99 still posts `com.spotify.client.PlaybackStateChanged`.
+The listener runs caught nothing, which says nothing either way: Spotify sat paused on one
+track throughout, and the notification fires only on a change.
+
+## Architecture
+
+Three independent units and one piece of glue. `Loopscape.swift` is a single file with
+top-level code today; with several sources `swiftc` allows top-level code only in
+`main.swift`, so the entry point moves there and `build.sh` compiles all app sources.
+
+| Unit | Does | Depends on |
+|---|---|---|
+| `NowPlaying` | Turns Spotify's state into `Track` events (id, name, artist, duration, position, playing/paused/stopped) | Spotify desktop client |
+| `ClipResolver` | `Track` → HLS URL or "none"; owns the mapping cache and the URL cache | `yt-dlp` |
+| `ScreenWallpaper` (extended) | Plays a remote HLS URL: start at position, loop, report failure | AVFoundation |
+| `AppDelegate` (glue) | State machine between rotation and clip mode, menu, saver marker | the three above |
+
+Data flow: `NowPlaying` event → glue cancels any resolve in flight → `ClipResolver.resolve`
+→ URL → every `ScreenWallpaper` streams it from the track's position → still grabbed from the
+stream → `syncDesktopPicture`. Paused → players pause. Stopped, Spotify quit, toggle off,
+resolve "none", or stream failure → back to the pack that was showing.
+
+### NowPlaying
+
+Listens on `DistributedNotificationCenter` for `com.spotify.client.PlaybackStateChanged`
+(Loopscape is not sandboxed, so `userInfo` is delivered). No permissions, no polling, no OAuth.
+Sees only the desktop client on the same Mac.
+
+Known limitation, accepted for v1: the notification fires on change only, so a Loopscape
+launched mid-track learns about it at the next play/pause/skip.
+
+Fallback if Part 0 fails: poll Spotify over AppleScript. Needs
+`NSAppleEventsUsageDescription` and a TCC Automation grant; with ad-hoc signing the grant may
+not survive a rebuild, which must be checked before committing to that route.
+
+### ClipResolver
+
+- Runs `yt-dlp` via `Process`, looking in `/opt/homebrew/bin`, `/usr/local/bin` and then
+  `PATH` — an app started from Finder or at login does not inherit the shell's `PATH`.
+- One call searches (`ytsearch5:<artist> <title> official video`) and returns candidates as
+  JSON. A pure scoring function picks one or none:
+  plus for "official video" / "music video" in the title, for a channel matching the artist
+  or VEVO, for duration close to the track's; minus for audio, lyric, live, cover, karaoke,
+  reaction, slowed, 8D. Below a threshold the answer is "none". Weights and the threshold
+  are not fixed here: they are tuned until the Part 2 fixtures pass.
+- Format selector: `bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]`. A video
+  with nothing in that range counts as "none", as does one that is private or removed.
+- The child process runs with the Homebrew prefix on its `PATH`, so `yt-dlp` finds `deno`.
+- Disk cache `clips.json` beside `packs.json`: `Track ID → video id | none`. Skips the search
+  and remembers misses. "none" entries expire after 30 days so a later release is picked up.
+  The file is plain JSON and doubles as the manual override: editing a track's `video` pins
+  a different clip.
+- `resolve` blocks for the length of the `yt-dlp` runs; the glue owns the queue it runs on.
+- RAM cache: resolved URL per video id until the `expire` timestamp embedded in the URL.
+- Distinct error for "`yt-dlp` not installed", surfaced in the menu as an install hint.
+
+### Streaming in ScreenWallpaper
+
+- `play(stream:at:)` beside the existing `play(_:)`; looping via `AVPlayerLooper` if it
+  holds up with HLS, otherwise seek to zero on `didPlayToEndTime`.
+- Item failure or a stall past a timeout is reported to the glue, which falls back to the
+  pack. An expired URL after a long sleep takes the same path, then one re-resolve.
+- One player per display, as today — so N displays stream N times. Measured in Part 3;
+  sharing one decode across displays is out of scope unless the numbers demand it.
+- The still for the menu bar strip is a frame grabbed from the stream with
+  `AVPlayerItemVideoOutput` (`AVAssetImageGenerator` does not support HLS), written to
+  `~/Library/Caches/<bundle id>/stills/<video id>.jpg`. One file per video id keeps the
+  existing invariant: the wallpaper agent caches by URL, so a still's URL is never rewritten.
+
+**Open risk:** a music video changes scenes, the still does not, so the menu bar strip can
+visibly disagree with the picture below it. Judged by eye in Part 3; remedies (average-colour
+still, periodic repaint) are decided then, not now.
+
+### Glue
+
+- Modes: `rotation` (today's behaviour) and `clip(track)`. The rotation timer is suspended in
+  clip mode and restarted on the way out.
+- Every resolve carries a generation counter; a result for a track that is no longer current
+  is dropped, so fast skipping never flashes intermediate clips.
+- `current.txt` keeps naming the last regular pack — the screen saver cannot stream.
+- Menu: a "Spotify clips" checkbox (off by default), a disabled "♪ Artist — Title" line while
+  a track is known, and the `yt-dlp` install hint when it is missing.
+
+## Parts and verification
+
+Parts 1–3 are independent and can land in any order; Part 4 needs all three. Until Part 4
+nothing can switch the wallpaper to a clip — Part 1 only adds the read-only menu line — so
+every part leaves a shippable app.
+
+### Part 0 — gate: track detection
+
+- Run a throwaway listener (a dozen lines: observe the notification on
+  `DistributedNotificationCenter`, print `userInfo`), then pause, play and skip in Spotify.
+- Pass: each action prints `Player State`, `Track ID`, `Name`, `Artist`, `Duration`,
+  `Playback Position`.
+- Fail: Part 1 is built on the AppleScript fallback, after checking that the TCC grant
+  survives `./build.sh`.
+
+### Part 1 — NowPlaying
+
+- `./build.sh` passes with the multi-file layout; packs, rotation, pause and the screen saver
+  behave as before.
+- Manual: skip, pause, resume, quit Spotify — the menu line follows within a second and
+  disappears on quit.
+- Manual: launch Loopscape mid-track — no line until the next event (the accepted limitation,
+  confirmed rather than assumed).
+
+### Part 2 — ClipResolver
+
+- `./build.sh --test` builds and runs a small test executable (plain `swiftc`, no Xcode).
+  Scoring tests use JSON fixtures captured from real searches for 8–10 tracks, including the
+  Get Lucky case and tracks with no video, where the expected answer is "none".
+- CLI harness `.build/resolve "<artist>" "<title>" <seconds>` prints the chosen video, URL and
+  timings. Pass: ≤ 8 s for an unknown track, ≤ 5 s with a mapping hit, instant within a
+  session, "none" written to the mapping and served from it on the next call.
+- The harness run under a Finder-like environment (`env -i PATH=/usr/bin:/bin:…`) still finds
+  `yt-dlp` and its JavaScript runtime. Without `yt-dlp` it reports the distinct "not
+  installed" error and exits cleanly. The same two checks against the real app — launched
+  with `open`, and showing the install hint in the menu — belong to Part 4, where the
+  resolver is first wired in.
+
+### Part 3 — streaming playback
+
+Driven by debug launch arguments `--play-url <m3u8>` and `--play-at <seconds>`, so Spotify is
+not involved.
+
+- First frame ≤ 2 s.
+- Loop: a ~30 s video, watch the seam several times.
+- Start position: `--play-at <seconds>` lands where asked.
+- Pause toggle, display sleep/wake, space switches and fullscreen behave as with a local pack.
+- Wi-Fi off for 30 s mid-stream, and an already-expired URL: both end on the regular pack,
+  never on black or a frozen frame.
+- Two displays: bandwidth in Activity Monitor ≈ 2× one display; note the drift between them.
+- CPU in Activity Monitor stays at a few percent.
+- Menu bar strip: screenshots at 3–4 points of a video with hard scene changes. Outcome is a
+  decision — acceptable, or pick a remedy before Part 4.
+
+### Part 4 — glue and menu
+
+Manual scenario run, each step with its expected result:
+
+1. Track with a video → clip within ~5 s, roughly at the track's position.
+2. Five quick skips → only the last track's clip appears.
+3. Track without a video → wallpaper does not flicker; `clips.json` gains a "none".
+4. Pause → video pauses; resume → it continues.
+5. Quit Spotify → the previous pack returns.
+6. Untick "Spotify clips" mid-clip → the pack returns at once.
+7. Leave a clip on past the rotation interval → rotation does not interrupt it; after the
+   track stops, rotation resumes.
+8. Lock the Mac during a clip → the screen saver plays a regular pack.
+9. Launch the app with `open`, not from a terminal → clips still resolve (`yt-dlp` and `deno`
+   are found without the shell's `PATH`).
+10. With `yt-dlp` out of reach → the menu shows the install hint, nothing crashes.
+
+README gains the feature section, the `yt-dlp` dependency and the terms-of-service note.
+Only after all ten steps pass: tag `v2.0` and build the DMG.
+
+## Out of scope (2.1+ candidates)
+
+Disk cache of video data with an LRU cap; a 720p / low-traffic option; reading Spotify's state
+at launch; playback on other devices via the Web API; sharing one decode across displays.
+Each is revisited only if use shows the need.

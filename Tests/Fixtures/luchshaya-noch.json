@@ -1,0 +1,42 @@
+{
+  "artist": "МакSим",
+  "name": "Лучшая ночь",
+  "seconds": 234,
+  "candidates": [
+    {
+      "id": "AtKMvNUEPMM",
+      "title": "МакSим - Лучшая ночь (официальный клип)",
+      "channel": "Maksim",
+      "duration": 236,
+      "channel_is_verified": true
+    },
+    {
+      "id": "Oob1iG44YtI",
+      "title": "Лучшая Ночь",
+      "channel": "Mitch Norris",
+      "duration": 277,
+      "channel_is_verified": null
+    },
+    {
+      "id": "q4E2GwlhV3g",
+      "title": "Макsим - Лучшая ночь",
+      "channel": "anna861",
+      "duration": 276,
+      "channel_is_verified": null
+    },
+    {
+      "id": "NdXh_Pl97QU",
+      "title": "МакSим - Лучшая ночь",
+      "channel": "СССР",
+      "duration": 231,
+      "channel_is_verified": null
+    },
+    {
+      "id": "5kRGPmtt9EQ",
+      "title": "Лучшая ночь (Санкт-Петербург, БКЗ, Сольный концерт \"Это же я\")",
+      "channel": "Maksim",
+      "duration": 246,
+      "channel_is_verified": true
+    }
+  ]
+}
