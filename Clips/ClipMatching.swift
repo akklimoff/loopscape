@@ -53,6 +53,8 @@ enum ClipMatching {
         "trailer", "behind the scenes", "making of", "hour", "hours", "tutorial", "lesson",
     ].map(normalize)
 
+    /// Lowercased, diacritics folded, punctuation turned into single spaces — so "МакSим",
+    /// "P!nk" and "Beyoncé" compare equal however a title decorates them.
     static func normalize(_ text: String) -> String {
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         let spaced = String(folded.unicodeScalars.map {
@@ -61,6 +63,8 @@ enum ClipMatching {
         return spaced.split(separator: " ").joined(separator: " ")
     }
 
+    /// Spotify decorates names with "(feat. …)", "[…]" and " - Remastered 2011"; YouTube
+    /// titles do not repeat them.
     static func cleanTrackName(_ name: String) -> String {
         var cleaned = name.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "",
                                                 options: .regularExpression)
@@ -73,6 +77,7 @@ enum ClipMatching {
         "\(track.artist) \(cleanTrackName(track.name)) official video"
     }
 
+    /// nil means the candidate is ruled out, not merely weak.
     static func score(_ candidate: Candidate, for track: TrackQuery) -> Int? {
         guard let duration = candidate.duration else { return nil }
         if track.seconds > 0 {
@@ -89,6 +94,8 @@ enum ClipMatching {
         guard title.contains(" \(name) ") else { return nil }
         guard title.contains(" \(artist) ") || channelIsArtist else { return nil }
 
+        // A track called "Audio" or "Live Forever" must not trip the word list on its own
+        // name, while "Audio (Official Audio)" still has to.
         var rest = title
         for own in [name, artist] {
             if let range = rest.range(of: " \(own) ") { rest.replaceSubrange(range, with: " ") }
@@ -105,6 +112,7 @@ enum ClipMatching {
         return score >= threshold ? score : nil
     }
 
+    /// Ties go to YouTube's own ranking, which is why the first best score wins.
     static func pick(for track: TrackQuery, from candidates: [Candidate]) -> Candidate? {
         var best: (candidate: Candidate, score: Int)?
         for candidate in candidates {
