@@ -59,15 +59,18 @@ final class ScreenWallpaper {
     }
 
     func play(_ url: URL) {
+        stream?.stop()
         stream = nil
         looper = nil
         player.removeAllItems()
         player.actionAtItemEnd = .none
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         player.play()
+        onStreamFailure = nil
     }
 
     func play(stream url: URL, at position: TimeInterval) {
+        stream?.stop()
         stream = nil
         looper = nil
         player.removeAllItems()
@@ -101,8 +104,9 @@ final class ScreenWallpaper {
     func resume() { if let stream { stream.resume() } else { player.play() } }
 
     func tearDown() {
-        player.pause()
+        stream?.stop()
         stream = nil
+        player.pause()
         looper = nil
         window.orderOut(nil)
         window.close()

@@ -13,14 +13,18 @@ enum StreamStill {
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes:
             [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(output)
-        poll(item: item, output: output, until: Date().addingTimeInterval(timeout),
+        poll(player: player, item: item, output: output, until: Date().addingTimeInterval(timeout),
              file: file, completion: completion)
     }
 
-    private static func poll(item: AVPlayerItem, output: AVPlayerItemVideoOutput, until deadline: Date,
-                             file: URL, completion: @escaping (Bool) -> Void) {
+    /// The grab starts right after play(stream:at:), while a seek may still be pending and
+    /// currentTime() reads 0; waiting for .playing skips that frame instead of writing a
+    /// still from position zero.
+    private static func poll(player: AVPlayer, item: AVPlayerItem, output: AVPlayerItemVideoOutput,
+                             until deadline: Date, file: URL, completion: @escaping (Bool) -> Void) {
         let time = item.currentTime()
-        if output.hasNewPixelBuffer(forItemTime: time),
+        if player.timeControlStatus == .playing,
+           output.hasNewPixelBuffer(forItemTime: time),
            let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
             item.remove(output)
             completion(write(buffer, to: file))
@@ -32,7 +36,7 @@ enum StreamStill {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            poll(item: item, output: output, until: deadline, file: file, completion: completion)
+            poll(player: player, item: item, output: output, until: deadline, file: file, completion: completion)
         }
     }
 

@@ -61,11 +61,16 @@ final class StreamSession {
         })
         playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             DispatchQueue.main.async {
+                guard let self else { return }
                 switch player.timeControlStatus {
-                case .playing, .paused:
-                    self?.clearStall()
+                case .playing:
+                    self.clearStall()
+                case .paused:
+                    // An unasked-for pause (an empty queue, a system interruption) is a stall;
+                    // pause() clears the stall itself before calling player.pause().
+                    if self.wantsPlay { self.stalled() } else { self.clearStall() }
                 case .waitingToPlayAtSpecifiedRate:
-                    self?.stalled()
+                    self.stalled()
                 default:
                     break
                 }
@@ -130,8 +135,10 @@ final class StreamSession {
         guard let pending = pendingSeek, pending.item === item else { return }
         pendingSeek = nil
         item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600)) { [weak self] _ in
-            guard let self, self.wantsPlay else { return }
-            self.player.play()
+            DispatchQueue.main.async {
+                guard let self, self.wantsPlay else { return }
+                self.player.play()
+            }
         }
     }
 
