@@ -17,10 +17,18 @@ final class PlayerView: NSView {
 }
 
 final class ScreenWallpaper {
+    /// A stall shorter than this is buffering; past it the network or the URL is gone, and
+    /// the regular pack is better than a frozen frame.
+    static let stallTimeout: TimeInterval = 20
+
     private let window: NSWindow
     private let view: PlayerView
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    private var stream: StreamSession?
+
+    var onStreamFailure: ((StreamFailure) -> Void)?
+    var isStreaming: Bool { stream != nil }
 
     init(screen: NSScreen) {
         let frame = screen.frame
@@ -51,10 +59,29 @@ final class ScreenWallpaper {
     }
 
     func play(_ url: URL) {
+        stream = nil
         looper = nil
         player.removeAllItems()
+        player.actionAtItemEnd = .none
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         player.play()
+    }
+
+    func play(stream url: URL, at position: TimeInterval) {
+        stream = nil
+        looper = nil
+        player.removeAllItems()
+        player.actionAtItemEnd = .advance
+        let session = StreamSession(url: url, player: player) { [weak self] failure in
+            self?.stream = nil
+            self?.onStreamFailure?(failure)
+        }
+        stream = session
+        session.start(at: position)
+    }
+
+    func grabStill(to file: URL, completion: @escaping (Bool) -> Void) {
+        StreamStill.grab(from: player, to: file, completion: completion)
     }
 
     func pause() { player.pause() }
@@ -75,6 +102,7 @@ final class ScreenWallpaper {
 
     func tearDown() {
         player.pause()
+        stream = nil
         looper = nil
         window.orderOut(nil)
         window.close()
