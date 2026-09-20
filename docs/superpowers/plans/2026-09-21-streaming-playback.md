@@ -364,7 +364,7 @@ final class StreamSession {
     }
 
     func resume() {
-        guard !finished else { return }
+        guard !finished, !wantsPlay else { return }
         wantsPlay = true
         stalled()
         // While the first item is still loading, the pending seek will call play() itself;
