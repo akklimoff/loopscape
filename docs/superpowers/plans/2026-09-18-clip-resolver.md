@@ -109,6 +109,7 @@ var fixturesDirectory = URL(fileURLWithPath: "Tests/Fixtures")
 private var registered: [(name: String, body: () throws -> Void)] = []
 private var failures: [String] = []
 private var running = ""
+private var temporaries: [URL] = []
 
 func test(_ name: String, _ body: @escaping () throws -> Void) {
     registered.append((name, body))
@@ -128,6 +129,7 @@ func runAll() -> Never {
         running = name
         do { try body() } catch { failures.append("\(name): threw \(error)") }
     }
+    temporaries.forEach { try? FileManager.default.removeItem(at: $0) }
     failures.forEach { print("FAIL \($0)") }
     print("\(registered.count) tests, \(failures.count) failures")
     exit(failures.isEmpty ? 0 : 1)
@@ -151,6 +153,7 @@ func temporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("loopscape-tests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    temporaries.append(directory)
     return directory
 }
 ```
@@ -498,6 +501,22 @@ func storeTests() {
         expectEqual(ClipStore(file: file).lookup("spotify:track:1"), .video("dQw4w9WgXcQ"))
     }
 
+    test("a video id that is not a usable string makes the entry unreadable") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        let fresh = ISO8601DateFormatter().string(from: clock)
+        let edited = """
+        {
+          "empty": { "video": "", "checked": "\(fresh)" },
+          "numeric": { "video": 5, "checked": "\(fresh)" }
+        }
+        """
+        try Data(edited.utf8).write(to: file)
+        let store = ClipStore(file: file, now: { clock })
+        expectEqual(store.lookup("empty"), nil)
+        expectEqual(store.lookup("numeric"), nil)
+    }
+
     test("a corrupt file starts empty instead of crashing") {
         let file = try temporaryDirectory().appendingPathComponent("clips.json")
         try Data("not json".utf8).write(to: file)
@@ -591,7 +610,10 @@ final class ClipStore {
 
     func lookup(_ trackID: String) -> Entry? {
         guard let record = load()[trackID] as? [String: Any] else { return nil }
-        if let video = record["video"] as? String, !video.isEmpty { return .video(video) }
+        if let video = record["video"] {
+            guard let id = video as? String, !id.isEmpty else { return nil }
+            return .video(id)
+        }
         guard let stamp = record["checked"] as? String,
               let checked = ISO8601DateFormatter().date(from: stamp) else { return nil }
         return now().timeIntervalSince(checked) < Self.missLifetime ? Entry.none : nil
@@ -622,7 +644,7 @@ final class ClipStore {
 - [ ] **Step 4: Run the tests**
 
 Run: `./build.sh --test`
-Expected: `24 tests, 0 failures`.
+Expected: `25 tests, 0 failures`.
 
 - [ ] **Step 5: Commit**
 
@@ -645,9 +667,9 @@ git commit -m "add track to video mapping store"
   - `enum ClipError: Error, Equatable { case toolMissing, unplayable, toolFailed(String) }`
   - `struct ClipStream: Equatable { url: URL, expires: Date }`
   - `protocol ClipSource { func search(_ query: String) throws -> [Candidate]; func stream(videoID: String) throws -> ClipStream }`
-  - `struct YtDlp: ClipSource` with `init(directories: [String] = YtDlp.defaultDirectories()) throws` (throws `.toolMissing`)
-  - Pure statics the tests use: `parseSearch(_: Data) throws -> [Candidate]`, `expiry(of: URL) -> Date?`, `locate(in: [String]) -> URL?`, `environment(for: URL, inherited: [String: String]) -> [String: String]`
-  - `static let minimumHeight = 480`, `static let format` (the selector from Global Constraints)
+  - `struct YtDlp: ClipSource` with `init(directories: [String] = YtDlp.defaultDirectories(), now: @escaping () -> Date = Date.init) throws` (throws `.toolMissing`; the defaults keep `YtDlp()` working)
+  - Pure statics the tests use: `parseSearch(_: Data) throws -> [Candidate]`, `parseStream(_ data: Data, now: Date) throws -> ClipStream`, `expiry(of: URL) -> Date?`, `locate(in: [String]) -> URL?`, `environment(for: URL, inherited: [String: String]) -> [String: String]`
+  - `static let minimumHeight = 480`, `static let format` (the selector from Global Constraints), `static let timeout: TimeInterval = 20`
 
 The process-running path (`search`, `stream`) has no unit test — it needs the network. Task 5 covers it live.
 
@@ -692,6 +714,30 @@ func ytDlpTests() {
         expectEqual(YtDlp.expiry(of: manifest), Date(timeIntervalSince1970: 1_790_000_000))
         expectEqual(YtDlp.expiry(of: direct), Date(timeIntervalSince1970: 1_790_000_123))
         expectEqual(YtDlp.expiry(of: plain), nil)
+    }
+
+    test("parseStream takes the deadline the URL carries") {
+        let line = "https://rr2---sn.googlevideo.com/videoplayback?expire=1790000123&ei=abc\n"
+        let stream = try YtDlp.parseStream(Data(line.utf8), now: Date(timeIntervalSince1970: 1_780_000_000))
+        expectEqual(stream.url, URL(string: "https://rr2---sn.googlevideo.com/videoplayback?expire=1790000123&ei=abc")!)
+        expectEqual(stream.expires, Date(timeIntervalSince1970: 1_790_000_123))
+    }
+
+    test("parseStream falls back to an hour from now when the URL carries none") {
+        let clock = Date(timeIntervalSince1970: 1_780_000_000)
+        let stream = try YtDlp.parseStream(Data("  https://example.com/video.m3u8  ".utf8), now: clock)
+        expectEqual(stream.url, URL(string: "https://example.com/video.m3u8")!)
+        expectEqual(stream.expires, clock + 3600)
+    }
+
+    test("parseStream reports a non-https line and empty output as tool failures") {
+        for output in ["ERROR: Requested format is not available", ""] {
+            do {
+                _ = try YtDlp.parseStream(Data(output.utf8), now: Date(timeIntervalSince1970: 0))
+                expect(false, "expected a throw for \(output)")
+            } catch ClipError.toolFailed {
+            }
+        }
     }
 
     test("locate returns the first directory holding an executable yt-dlp") {
@@ -769,6 +815,7 @@ protocol ClipSource {
 
 struct YtDlp: ClipSource {
     static let minimumHeight = 480
+    static let timeout: TimeInterval = 20
 
     /// H.264 only: AVFoundation does not play VP9, and AV1 has no hardware decoder before M3.
     /// HLS only: the https DASH variants take ~14 s to start and report a doubled duration.
@@ -778,10 +825,13 @@ struct YtDlp: ClipSource {
     static let homebrewDirectories = ["/opt/homebrew/bin", "/usr/local/bin"]
 
     let executable: URL
+    private let now: () -> Date
 
-    init(directories: [String] = YtDlp.defaultDirectories()) throws {
+    init(directories: [String] = YtDlp.defaultDirectories(),
+         now: @escaping () -> Date = Date.init) throws {
         guard let found = YtDlp.locate(in: directories) else { throw ClipError.toolMissing }
         executable = found
+        self.now = now
     }
 
     static func defaultDirectories() -> [String] {
@@ -802,11 +852,7 @@ struct YtDlp: ClipSource {
     func stream(videoID: String) throws -> ClipStream {
         let output = try run(["-f", YtDlp.format, "--print", "url",
                               "https://www.youtube.com/watch?v=\(videoID)"])
-        let line = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: line), url.scheme == "https" else {
-            throw ClipError.toolFailed("unexpected output: \(line.prefix(200))")
-        }
-        return ClipStream(url: url, expires: YtDlp.expiry(of: url) ?? Date().addingTimeInterval(3600))
+        return try YtDlp.parseStream(output, now: now())
     }
 
     static func parseSearch(_ data: Data) throws -> [Candidate] {
@@ -816,6 +862,14 @@ struct YtDlp: ClipSource {
         } catch {
             throw ClipError.toolFailed("unreadable search result: \(error)")
         }
+    }
+
+    static func parseStream(_ data: Data, now: Date) throws -> ClipStream {
+        let line = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: line), url.scheme == "https" else {
+            throw ClipError.toolFailed("unexpected output: \(line.prefix(200))")
+        }
+        return ClipStream(url: url, expires: expiry(of: url) ?? now.addingTimeInterval(3600))
     }
 
     /// googlevideo URLs carry their own deadline, as "/expire/<unix>/" in HLS manifests and
@@ -840,7 +894,8 @@ struct YtDlp: ClipSource {
     private func run(_ arguments: [String]) throws -> Data {
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["--no-warnings", "--socket-timeout", "10"] + arguments
+        process.arguments = ["--no-warnings", "--ignore-config", "--socket-timeout", "10",
+                             "--retries", "1", "--extractor-retries", "1"] + arguments
         process.environment = YtDlp.environment(for: executable,
                                                 inherited: ProcessInfo.processInfo.environment)
 
@@ -849,9 +904,34 @@ struct YtDlp: ClipSource {
         process.standardOutput = output
         process.standardError = errors
         do { try process.run() } catch { throw ClipError.toolMissing }
+
+        // yt-dlp retries on its own and runs YouTube's player JS in a separate runtime, and
+        // --socket-timeout bounds neither, so the run needs a deadline of its own.
+        let lock = NSLock()
+        var expired = false
+        let watchdog = DispatchWorkItem {
+            lock.lock()
+            defer { lock.unlock() }
+            guard process.isRunning else { return }
+            expired = true
+            process.terminate()
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + YtDlp.timeout, execute: watchdog)
+
+        var complaint = ""
+        let reading = DispatchGroup()
+        DispatchQueue.global().async(group: reading) {
+            complaint = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        let complaint = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        reading.wait()
         process.waitUntilExit()
+        watchdog.cancel()
+
+        lock.lock()
+        let timedOut = expired
+        lock.unlock()
+        if timedOut { throw ClipError.toolFailed("yt-dlp timed out after 20 s") }
 
         guard process.terminationStatus == 0 else {
             let gone = ["Requested format is not available", "Video unavailable", "Private video"]
@@ -866,7 +946,7 @@ struct YtDlp: ClipSource {
 - [ ] **Step 4: Run the tests**
 
 Run: `./build.sh --test`
-Expected: `30 tests, 0 failures`.
+Expected: `34 tests, 0 failures`.
 
 - [ ] **Step 5: Commit**
 
@@ -888,7 +968,7 @@ git commit -m "add yt-dlp search and stream lookup"
 - Produces:
   - `enum ClipResolution: Equatable { case stream(videoID: String, url: URL), none }`
   - `final class ClipResolver` with `init(store: ClipStore, source: ClipSource, now: @escaping () -> Date = Date.init)`
-  - `func resolve(_ track: TrackQuery) throws -> ClipResolution` — blocking; throws `ClipError.toolMissing` / `.toolFailed`, never `.unplayable`
+  - `func resolve(_ track: TrackQuery) throws -> ClipResolution` — blocking; throws `ClipError.toolMissing` / `.toolFailed` (including on an empty search result), never `.unplayable`; never writes the store for an id that came from the store
   - `static let expiryMargin: TimeInterval` (600)
 
 - [ ] **Step 1: Write the failing tests**
@@ -982,6 +1062,31 @@ func resolverTests() {
         expectEqual(source.searches, [])
     }
 
+    test("an unplayable pinned video is left alone") {
+        let (store, file) = try makeStore()
+        store.record(.video("dQw4w9WgXcQ"), for: track.id)
+        let source = FakeSource()
+        source.streamResult = .failure(.unplayable)
+        let resolver = ClipResolver(store: ClipStore(file: file), source: source, now: { start })
+
+        expectEqual(try resolver.resolve(track), ClipResolution.none)
+        expectEqual(store.lookup(track.id), .video("dQw4w9WgXcQ"))
+        expectEqual(source.searches, [])
+    }
+
+    test("a mapped track does not rewrite the mapping") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        ClipStore(file: file, now: { start }).record(.video("dQw4w9WgXcQ"), for: track.id)
+        let before = try Data(contentsOf: file)
+        let source = FakeSource()
+        source.streamResult = .success(ClipStream(url: url, expires: start + 3600))
+        let later = ClipStore(file: file, now: { start + 3600 })
+        let resolver = ClipResolver(store: later, source: source, now: { start })
+
+        expectEqual(try resolver.resolve(track), .stream(videoID: "dQw4w9WgXcQ", url: url))
+        expectEqual(try Data(contentsOf: file), before)
+    }
+
     test("no acceptable candidate is remembered as a miss") {
         let (store, _) = try makeStore()
         let source = FakeSource()
@@ -992,6 +1097,20 @@ func resolverTests() {
         expectEqual(try resolver.resolve(track), ClipResolution.none)
         expectEqual(try resolver.resolve(track), ClipResolution.none)
         expectEqual(source.searches.count, 1)
+        expectEqual(source.streamRequests, [])
+    }
+
+    test("an empty search result is a tool failure") {
+        let (store, _) = try makeStore()
+        let source = FakeSource()
+        let resolver = ClipResolver(store: store, source: source, now: { start })
+
+        do {
+            _ = try resolver.resolve(track)
+            expect(false, "expected a throw")
+        } catch ClipError.toolFailed {
+        }
+        expectEqual(store.lookup(track.id), nil)
         expectEqual(source.streamRequests, [])
     }
 
@@ -1055,7 +1174,8 @@ enum ClipResolution: Equatable {
 }
 
 /// Blocking by design: a resolve is two yt-dlp runs of a few seconds each, so the caller
-/// owns the queue it runs on and decides what to do with a result that arrives too late.
+/// owns the queue it runs on — a single serial queue, since the cached streams are
+/// unsynchronised — and decides what to do with a result that arrives too late.
 final class ClipResolver {
     /// A stream that dies mid-clip is worse than a fresh resolve, so a URL close to its
     /// deadline is not handed out.
@@ -1074,26 +1194,30 @@ final class ClipResolver {
 
     func resolve(_ track: TrackQuery) throws -> ClipResolution {
         let videoID: String
+        let foundBySearch: Bool
         switch store.lookup(track.id) {
         case .some(.none):
             return .none
         case .some(.video(let known)):
             videoID = known
+            foundBySearch = false
         case nil:
             let candidates = try source.search(ClipMatching.searchQuery(for: track))
+            guard !candidates.isEmpty else { throw ClipError.toolFailed("empty search result") }
             guard let picked = ClipMatching.pick(for: track, from: candidates) else {
                 store.record(.none, for: track.id)
                 return .none
             }
             videoID = picked.id
+            foundBySearch = true
         }
 
         do {
             let stream = try liveStream(for: videoID)
-            store.record(.video(videoID), for: track.id)
+            if foundBySearch { store.record(.video(videoID), for: track.id) }
             return .stream(videoID: videoID, url: stream.url)
         } catch ClipError.unplayable {
-            store.record(.none, for: track.id)
+            if foundBySearch { store.record(.none, for: track.id) }
             return .none
         }
     }
@@ -1113,7 +1237,7 @@ final class ClipResolver {
 - [ ] **Step 4: Run the tests**
 
 Run: `./build.sh --test`
-Expected: `37 tests, 0 failures`.
+Expected: `44 tests, 0 failures`.
 
 - [ ] **Step 5: Commit**
 
@@ -1189,7 +1313,7 @@ In `build.sh`, inside the `--test` branch, between the line that runs `.build/te
 ```
 
 Run: `./build.sh --test`
-Expected: `37 tests, 0 failures`, then `==> compiling resolve` with no errors.
+Expected: `44 tests, 0 failures`, then `==> compiling resolve` with no errors.
 
 - [ ] **Step 3: The missing-tool path, while the tool is still missing**
 
@@ -1244,7 +1368,7 @@ Expected: the video starts within a couple of seconds at 480p or better, silent 
 
 - [ ] **Step 9: Record what was measured**
 
-If the timings from Step 4 differ from the spec's "Prototype resolver end to end" row by more than a second, update that row and the pass criteria in the spec's Part 2 section to match reality, saying which `yt-dlp` and JS runtime produced them.
+If the timings from Step 5 differ from the spec's "Prototype resolver end to end" row by more than a second, update that row and the pass criteria in the spec's Part 2 section to match reality, saying which `yt-dlp` and JS runtime produced them.
 
 - [ ] **Step 10: Commit**
 
@@ -1257,6 +1381,6 @@ git commit -m "add resolve harness for live clip lookups"
 
 ## Done when
 
-- `./build.sh --test` prints `37 tests, 0 failures` and builds `.build/resolve`.
+- `./build.sh --test` prints `44 tests, 0 failures` and builds `.build/resolve`.
 - Steps 3–8 of Task 5 gave the expected results, with the measured timings reported to Aktan.
 - `./build.sh --dest .build/check` still builds the app, and `git diff main -- Loopscape.swift LoopscapeSaver.swift make-dmg.sh` is empty.
