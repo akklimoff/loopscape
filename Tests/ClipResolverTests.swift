@@ -84,6 +84,31 @@ func resolverTests() {
         expectEqual(source.searches, [])
     }
 
+    test("an unplayable pinned video is left alone") {
+        let (store, file) = try makeStore()
+        store.record(.video("dQw4w9WgXcQ"), for: track.id)
+        let source = FakeSource()
+        source.streamResult = .failure(.unplayable)
+        let resolver = ClipResolver(store: ClipStore(file: file), source: source, now: { start })
+
+        expectEqual(try resolver.resolve(track), ClipResolution.none)
+        expectEqual(store.lookup(track.id), .video("dQw4w9WgXcQ"))
+        expectEqual(source.searches, [])
+    }
+
+    test("a mapped track does not rewrite the mapping") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        ClipStore(file: file, now: { start }).record(.video("dQw4w9WgXcQ"), for: track.id)
+        let before = try Data(contentsOf: file)
+        let source = FakeSource()
+        source.streamResult = .success(ClipStream(url: url, expires: start + 3600))
+        let later = ClipStore(file: file, now: { start + 3600 })
+        let resolver = ClipResolver(store: later, source: source, now: { start })
+
+        expectEqual(try resolver.resolve(track), .stream(videoID: "dQw4w9WgXcQ", url: url))
+        expectEqual(try Data(contentsOf: file), before)
+    }
+
     test("no acceptable candidate is remembered as a miss") {
         let (store, _) = try makeStore()
         let source = FakeSource()
@@ -94,6 +119,20 @@ func resolverTests() {
         expectEqual(try resolver.resolve(track), ClipResolution.none)
         expectEqual(try resolver.resolve(track), ClipResolution.none)
         expectEqual(source.searches.count, 1)
+        expectEqual(source.streamRequests, [])
+    }
+
+    test("an empty search result is a tool failure") {
+        let (store, _) = try makeStore()
+        let source = FakeSource()
+        let resolver = ClipResolver(store: store, source: source, now: { start })
+
+        do {
+            _ = try resolver.resolve(track)
+            expect(false, "expected a throw")
+        } catch ClipError.toolFailed {
+        }
+        expectEqual(store.lookup(track.id), nil)
         expectEqual(source.streamRequests, [])
     }
 

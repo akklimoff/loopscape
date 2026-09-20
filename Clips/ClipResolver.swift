@@ -6,7 +6,8 @@ enum ClipResolution: Equatable {
 }
 
 /// Blocking by design: a resolve is two yt-dlp runs of a few seconds each, so the caller
-/// owns the queue it runs on and decides what to do with a result that arrives too late.
+/// owns the queue it runs on — a single serial queue, since the cached streams are
+/// unsynchronised — and decides what to do with a result that arrives too late.
 final class ClipResolver {
     /// A stream that dies mid-clip is worse than a fresh resolve, so a URL close to its
     /// deadline is not handed out.
@@ -25,26 +26,30 @@ final class ClipResolver {
 
     func resolve(_ track: TrackQuery) throws -> ClipResolution {
         let videoID: String
+        let foundBySearch: Bool
         switch store.lookup(track.id) {
         case .some(.none):
             return .none
         case .some(.video(let known)):
             videoID = known
+            foundBySearch = false
         case nil:
             let candidates = try source.search(ClipMatching.searchQuery(for: track))
+            guard !candidates.isEmpty else { throw ClipError.toolFailed("empty search result") }
             guard let picked = ClipMatching.pick(for: track, from: candidates) else {
                 store.record(.none, for: track.id)
                 return .none
             }
             videoID = picked.id
+            foundBySearch = true
         }
 
         do {
             let stream = try liveStream(for: videoID)
-            store.record(.video(videoID), for: track.id)
+            if foundBySearch { store.record(.video(videoID), for: track.id) }
             return .stream(videoID: videoID, url: stream.url)
         } catch ClipError.unplayable {
-            store.record(.none, for: track.id)
+            if foundBySearch { store.record(.none, for: track.id) }
             return .none
         }
     }
