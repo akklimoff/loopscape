@@ -29,6 +29,7 @@ final class StreamSession {
     private var stallCounter = 0
     private var finished = false
     private var wantsPlay = true
+    private(set) var isPositioned = false
 
     init(url: URL, player: AVQueuePlayer, onFailure: @escaping (StreamFailure) -> Void) {
         self.url = url
@@ -83,6 +84,7 @@ final class StreamSession {
         if position > 0 {
             pendingSeek = (first, position)
         } else {
+            isPositioned = true
             player.play()
         }
     }
@@ -134,9 +136,12 @@ final class StreamSession {
     private func itemReady(_ item: AVPlayerItem) {
         guard let pending = pendingSeek, pending.item === item else { return }
         pendingSeek = nil
-        item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600)) { [weak self] _ in
+        item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600),
+                  toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.wantsPlay else { return }
+                guard let self else { return }
+                self.isPositioned = true
+                guard self.wantsPlay else { return }
                 self.player.play()
             }
         }

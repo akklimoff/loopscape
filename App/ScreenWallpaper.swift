@@ -83,9 +83,10 @@ final class ScreenWallpaper {
         session.start(at: position)
     }
 
-    func grabStill(to file: URL, startingAt position: TimeInterval,
-                   completion: @escaping (Bool) -> Void) {
-        StreamStill.grab(from: player, startingAt: position, to: file, completion: completion)
+    func grabStill(to file: URL, completion: @escaping (Bool) -> Void) {
+        StreamStill.grab(from: player, to: file,
+                         isPositioned: { [weak self] in self?.stream?.isPositioned ?? false },
+                         completion: completion)
     }
 
     func pause() { if let stream { stream.pause() } else { player.pause() } }
