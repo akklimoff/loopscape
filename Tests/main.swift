@@ -6,4 +6,5 @@ if let path = CommandLine.arguments.dropFirst().first {
 matchingTests()
 storeTests()
 ytDlpTests()
+resolverTests()
 runAll()
