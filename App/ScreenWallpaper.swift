@@ -84,7 +84,7 @@ final class ScreenWallpaper {
         StreamStill.grab(from: player, to: file, completion: completion)
     }
 
-    func pause() { player.pause() }
+    func pause() { if let stream { stream.pause() } else { player.pause() } }
 
     /// A desktop-level window is not always carried into a fullscreen space created after
     /// it was ordered in; re-ordering on every space change makes it show up there too.
@@ -98,7 +98,7 @@ final class ScreenWallpaper {
         window.orderFrontRegardless()
     }
 
-    func resume() { player.play() }
+    func resume() { if let stream { stream.resume() } else { player.play() } }
 
     func tearDown() {
         player.pause()

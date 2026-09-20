@@ -28,6 +28,7 @@ final class StreamSession {
     private var stallToken: Int?
     private var stallCounter = 0
     private var finished = false
+    private var wantsPlay = true
 
     init(url: URL, player: AVQueuePlayer, onFailure: @escaping (StreamFailure) -> Void) {
         self.url = url
@@ -91,6 +92,21 @@ final class StreamSession {
         finished = true
     }
 
+    func pause() {
+        wantsPlay = false
+        clearStall()
+        player.pause()
+    }
+
+    func resume() {
+        guard !finished else { return }
+        wantsPlay = true
+        stalled()
+        // While the first item is still loading, the pending seek will call play() itself;
+        // playing here first would start the stream at 0 before the seek lands.
+        if pendingSeek == nil { player.play() }
+    }
+
     private func makeItem() -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
         owned.append(item)
@@ -114,7 +130,8 @@ final class StreamSession {
         guard let pending = pendingSeek, pending.item === item else { return }
         pendingSeek = nil
         item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600)) { [weak self] _ in
-            self?.player.play()
+            guard let self, self.wantsPlay else { return }
+            self.player.play()
         }
     }
 
