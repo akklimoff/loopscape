@@ -38,7 +38,8 @@ enum StreamStill {
 
     private static func write(_ buffer: CVPixelBuffer, to file: URL) -> Bool {
         let image = CIImage(cvPixelBuffer: buffer)
-        guard let frame = CIContext().createCGImage(image, from: image.extent),
+        guard let frame = CIContext().createCGImage(image, from: image.extent, format: .RGBA8,
+                                                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!),
               let jpeg = NSBitmapImageRep(cgImage: frame)
                   .representation(using: .jpeg, properties: [.compressionFactor: 0.9])
         else { return false }
