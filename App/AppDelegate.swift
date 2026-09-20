@@ -186,7 +186,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         unposterable = []
         if stream != nil {
             if !packs.contains(where: { $0.slug == currentSlug }) {
-                currentSlug = packs.isEmpty ? nil : pick()
+                if packs.isEmpty {
+                    currentSlug = nil
+                } else {
+                    let slug = pick()
+                    currentSlug = slug
+                    markCurrentForSaver(slug)
+                }
             }
         } else if packs.isEmpty {
             wallpapers.forEach { $0.tearDown() }
