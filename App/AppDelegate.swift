@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import ServiceManagement
 import UniformTypeIdentifiers
+import os
 
 private let defaultRoot: URL = {
     let base = FileManager.default
@@ -33,7 +34,7 @@ struct Pack: Decodable {
     var title: String { Lang.t(en, ru) }
 }
 
-struct Stream {
+struct ClipStream {
     let url: URL
     let position: TimeInterval
     let stillID: String
@@ -52,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var root = defaultRoot
     private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
-    private var stream: Stream?
+    private var stream: ClipStream?
     private var desktopStill: URL?
     private let options: LaunchOptions
 
@@ -104,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
         if let url = options.playURL {
-            startStream(Stream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
+            startStream(ClipStream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
         }
     }
 
@@ -183,7 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func reloadLibrary() {
         packs = loadPacks()
         unposterable = []
-        if packs.isEmpty {
+        if stream != nil {
+            if !packs.contains(where: { $0.slug == currentSlug }) {
+                currentSlug = packs.isEmpty ? nil : pick()
+            }
+        } else if packs.isEmpty {
             wallpapers.forEach { $0.tearDown() }
             wallpapers = []
             currentSlug = nil
@@ -276,12 +281,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func syncDesktopPicture(still: URL) {
         desktopStill = still
-        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+        let imageOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: imageOptions)
         }
     }
 
@@ -363,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func applySelection(_ slug: String) {
+        let wasStreaming = stream != nil
         stream = nil
         currentSlug = slug
         rememberPin(slug)
@@ -370,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         syncDesktopPicture(slug)
         markCurrentForSaver(slug)
         refreshMenu()
+        if wasStreaming { restartTimer() }
     }
 
     // MARK: - streaming
@@ -381,8 +388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return caches.appendingPathComponent(bundleID).appendingPathComponent("stills")
     }
 
-    private func startStream(_ target: Stream) {
+    private func startStream(_ target: ClipStream) {
         stream = target
+        timer?.invalidate()
+        timer = nil
         if wallpapers.isEmpty { rebuildScreens() }
         let started = Date()
         for wallpaper in wallpapers {
@@ -398,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         wallpapers.first?.grabStill(to: still) { [weak self] written in
             guard let self, self.stream?.url == target.url else { return }
-            NSLog("stream: first frame after %.2f s, still %@",
+            os_log("stream: first frame after %{public}.2f s, still %{public}@",
                   Date().timeIntervalSince(started), written ? "written" : "not written")
             if written { self.syncDesktopPicture(still: still) }
         }
@@ -406,8 +415,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func streamFailed(_ failure: StreamFailure) {
         guard stream != nil else { return }
-        NSLog("stream: %@ — back to the pack", failure.description)
+        os_log("stream: %{public}@ — back to the pack", failure.description)
         stream = nil
+        restartTimer()
         if let slug = currentSlug {
             startPlayback(slug)
             syncDesktopPicture(slug)
@@ -422,6 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - timer
 
     private func restartTimer() {
+        guard stream == nil else { return }
         timer?.invalidate()
         timer = nil
         let minutes = defaults.integer(forKey: Key.minutes)
