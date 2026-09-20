@@ -598,7 +598,25 @@ with
     }
 ```
 
-`pause()`, `resume()`, `raise()`, `align(to:)` and `init(screen:)` stay as they are (`init` already sets `actionAtItemEnd = .none` and `isMuted = true`).
+Replace `pause()` and `resume()`
+
+```swift
+    func pause() { player.pause() }
+```
+with
+```swift
+    func pause() { if let stream { stream.pause() } else { player.pause() } }
+```
+
+```swift
+    func resume() { player.play() }
+```
+with
+```swift
+    func resume() { if let stream { stream.resume() } else { player.play() } }
+```
+
+`raise()`, `align(to:)` and `init(screen:)` stay as they are (`init` already sets `actionAtItemEnd = .none` and `isMuted = true`).
 
 - [ ] **Step 4: Build**
 
@@ -617,7 +635,7 @@ git commit -m "play a looping HLS stream on the wallpaper windows"
 ### Task 4: Debug stream in the app
 
 **Files:**
-- Modify: `App/AppDelegate.swift` (stored properties, `init`, `applicationDidFinishLaunching`, `spaceChanged`, `syncDesktopPicture`, `screensChanged`, `screensDidWake`, `startPlayback`, `applySelection`, `togglePause`, new `// MARK: - streaming` section), `App/main.swift` (delegate construction)
+- Modify: `App/AppDelegate.swift` (imports, stored properties, `init`, `applicationDidFinishLaunching`, `spaceChanged`, `syncDesktopPicture`, `screensChanged`, `screensDidWake`, `startPlayback`, `applySelection`, `togglePause`, `reloadLibrary`, `restartTimer`, new `// MARK: - streaming` section), `App/main.swift` (delegate construction)
 
 **Interfaces:**
 - Consumes: `LaunchOptions` (Task 2); `ScreenWallpaper.play(stream:at:)`, `onStreamFailure`, `grabStill(to:completion:)`, `StreamFailure` (Task 3).
@@ -816,6 +834,9 @@ In `togglePause()` replace `if let slug = currentSlug { syncDesktopPicture(slug)
 
 - [ ] **Step 5: The streaming section**
 
+Add `import os` to `App/AppDelegate.swift`'s import list — `os_log` below needs `%{public}`
+markers to show up unredacted in unified logging on an ad-hoc-signed build, unlike `NSLog`.
+
 Before `// MARK: - timer` add:
 
 ```swift
@@ -869,6 +890,125 @@ Before `// MARK: - timer` add:
         }
     }
 ```
+
+Replace `reloadLibrary`
+
+```swift
+    private func reloadLibrary() {
+        packs = loadPacks()
+        unposterable = []
+        if packs.isEmpty {
+            wallpapers.forEach { $0.tearDown() }
+            wallpapers = []
+            currentSlug = nil
+        } else if wallpapers.isEmpty {
+            rebuildScreens()
+            applySelection(pick())
+        } else if !packs.contains(where: { $0.slug == currentSlug }) {
+            applySelection(pick())
+        }
+        // Opening the menu must not reset the countdown, so only a stopped timer is touched.
+        if timer == nil || packs.count < 2 { restartTimer() }
+        refreshMenu()
+    }
+```
+with
+```swift
+    private func reloadLibrary() {
+        packs = loadPacks()
+        unposterable = []
+        if stream != nil {
+            if !packs.contains(where: { $0.slug == currentSlug }) {
+                if packs.isEmpty {
+                    currentSlug = nil
+                } else {
+                    let slug = pick()
+                    currentSlug = slug
+                    markCurrentForSaver(slug)
+                }
+            }
+        } else if packs.isEmpty {
+            wallpapers.forEach { $0.tearDown() }
+            wallpapers = []
+            currentSlug = nil
+        } else if wallpapers.isEmpty {
+            rebuildScreens()
+            applySelection(pick())
+        } else if !packs.contains(where: { $0.slug == currentSlug }) {
+            applySelection(pick())
+        }
+        // Opening the menu must not reset the countdown, so only a stopped timer is touched.
+        if timer == nil || packs.count < 2 { restartTimer() }
+        refreshMenu()
+    }
+```
+While a stream plays, a menu open or a library-folder write must not tear down the windows or
+start a pack; `currentSlug` (and the saver's `current.txt`, via `markCurrentForSaver`) is kept
+honest for when the stream ends, but nothing plays until then.
+
+Replace `restartTimer`
+
+```swift
+    private func restartTimer() {
+        timer?.invalidate()
+        timer = nil
+        let minutes = defaults.integer(forKey: Key.minutes)
+        guard minutes > 0, packs.count > 1, !isPaused else {
+            if let token = activity { ProcessInfo.processInfo.endActivity(token) }
+            activity = nil
+            return
+        }
+        let rotation = Timer(timeInterval: Double(minutes) * 60,
+                             repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.applySelection(self.pick())
+        }
+        rotation.tolerance = 30
+        // .common keeps the timer ticking while the status menu is open; App Nap would
+        // otherwise defer a background accessory's timers indefinitely, so hold an
+        // activity for as long as rotation is on.
+        RunLoop.main.add(rotation, forMode: .common)
+        timer = rotation
+        if activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiatedAllowingIdleSystemSleep,
+                reason: "Wallpaper rotation")
+        }
+    }
+```
+with
+```swift
+    private func restartTimer() {
+        guard stream == nil else { return }
+        timer?.invalidate()
+        timer = nil
+        let minutes = defaults.integer(forKey: Key.minutes)
+        guard minutes > 0, packs.count > 1, !isPaused else {
+            if let token = activity { ProcessInfo.processInfo.endActivity(token) }
+            activity = nil
+            return
+        }
+        let rotation = Timer(timeInterval: Double(minutes) * 60,
+                             repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.applySelection(self.pick())
+        }
+        rotation.tolerance = 30
+        // .common keeps the timer ticking while the status menu is open; App Nap would
+        // otherwise defer a background accessory's timers indefinitely, so hold an
+        // activity for as long as rotation is on.
+        RunLoop.main.add(rotation, forMode: .common)
+        timer = rotation
+        if activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiatedAllowingIdleSystemSleep,
+                reason: "Wallpaper rotation")
+        }
+    }
+```
+Rotation must never fire while a stream is active: `startStream` already invalidates the timer
+before playing, and `streamFailed`/`applySelection` restart it once the stream ends — this guard
+makes `restartTimer()` itself refuse to run in between.
 
 - [ ] **Step 6: Build**
 
