@@ -50,13 +50,17 @@ Taken on this machine (M1 Max, macOS 26.6.2, yt-dlp 2026.08.19, Python 3.13) wit
 |---|---|
 | Flat search, 5 candidates (`--flat-playlist -J`) | 2.6 s |
 | Resolve HLS URL for a known video id | 2.8–4.4 s |
-| Prototype resolver end to end: unknown track / mapped track / same session | 7.5 s / 4.4 s / 0 s |
+| Prototype resolver end to end: unknown track / mapped track / same session | 5.5 s / 3.5 s / 0.0 s |
 | HLS (format 270, 1080p avc1): first frame in `AVPlayer` | 1.05 s |
 | HLS: playing again after seek to 120 s | 0.7 s |
 | HLS: duration reported by AVFoundation | 247.7 s, correct |
 | Direct https DASH URL (format 137): first frame | 14.5 s |
 | Direct https DASH URL / downloaded file: duration | 495.4 s, doubled; `ffmpeg -c copy` fixes a file |
 | AVPlayer forward buffer while streaming | ~7 s |
+
+The resolver row was re-measured with the real `.build/resolve` harness (Task 5, Rick Astley —
+Never Gonna Give You Up), replacing the earlier prototype-script estimate: `yt-dlp 2026.08.19`,
+`deno 2.9.7`. Both numbers still clear the Part 2 pass criteria below.
 
 Consequences: HLS is the only variant worth building. H.264 ≤ 1080p is the format — M1 has no
 AV1 hardware decoder and AVFoundation does not play VP9. 1080p HLS runs at ~4.7 Mbit/s, about
