@@ -35,6 +35,22 @@ func storeTests() {
         expectEqual(ClipStore(file: file).lookup("spotify:track:1"), .video("dQw4w9WgXcQ"))
     }
 
+    test("a video id that is not a usable string makes the entry unreadable") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        let fresh = ISO8601DateFormatter().string(from: clock)
+        let edited = """
+        {
+          "empty": { "video": "", "checked": "\(fresh)" },
+          "numeric": { "video": 5, "checked": "\(fresh)" }
+        }
+        """
+        try Data(edited.utf8).write(to: file)
+        let store = ClipStore(file: file, now: { clock })
+        expectEqual(store.lookup("empty"), nil)
+        expectEqual(store.lookup("numeric"), nil)
+    }
+
     test("a corrupt file starts empty instead of crashing") {
         let file = try temporaryDirectory().appendingPathComponent("clips.json")
         try Data("not json".utf8).write(to: file)

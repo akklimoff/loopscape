@@ -20,7 +20,10 @@ final class ClipStore {
 
     func lookup(_ trackID: String) -> Entry? {
         guard let record = load()[trackID] as? [String: Any] else { return nil }
-        if let video = record["video"] as? String, !video.isEmpty { return .video(video) }
+        if let video = record["video"] {
+            guard let id = video as? String, !id.isEmpty else { return nil }
+            return .video(id)
+        }
         guard let stamp = record["checked"] as? String,
               let checked = ISO8601DateFormatter().date(from: stamp) else { return nil }
         return now().timeIntervalSince(checked) < Self.missLifetime ? Entry.none : nil
