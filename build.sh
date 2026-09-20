@@ -7,7 +7,7 @@ set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
-VERSION="1.6"
+VERSION="2.0"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${1:-}" == "--test" ]]; then
@@ -46,7 +46,7 @@ fi
 
 echo "==> compiling"
 swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
-    -o "$HERE/.build/${APP_NAME}" "$HERE/${APP_NAME}.swift"
+    -o "$HERE/.build/${APP_NAME}" "$HERE"/App/*.swift
 
 SAVER_NAME="${APP_NAME}Saver"
 echo "==> compiling screen saver"
