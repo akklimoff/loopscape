@@ -286,9 +286,12 @@ final class StreamSession {
     private let player: AVQueuePlayer
     private let onFailure: (StreamFailure) -> Void
     private var owned: [AVPlayerItem] = []
-    private var observations: [NSKeyValueObservation] = []
+    private var itemObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
+    private var playerObservation: NSKeyValueObservation?
     private var tokens: [NSObjectProtocol] = []
-    private var stallStarted: Date?
+    private var pendingSeek: (item: AVPlayerItem, position: TimeInterval)?
+    private var stallToken: Int?
+    private var stallCounter = 0
     private var finished = false
 
     init(url: URL, player: AVQueuePlayer, onFailure: @escaping (StreamFailure) -> Void) {
@@ -320,17 +323,24 @@ final class StreamSession {
             guard let self, self.owns(note.object) else { return }
             self.stalled()
         })
-        observations.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            if player.timeControlStatus == .playing { self?.stallStarted = nil }
-        })
+        playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            DispatchQueue.main.async {
+                switch player.timeControlStatus {
+                case .playing, .paused:
+                    self?.clearStall()
+                case .waitingToPlayAtSpecifiedRate:
+                    self?.stalled()
+                default:
+                    break
+                }
+            }
+        }
 
         // Until the first frame plays the stream is "stalled" from the user's point of view,
         // so the same timeout covers a URL that never starts and one that dies mid-way.
         stalled()
         if position > 0 {
-            first.seek(to: CMTime(seconds: position, preferredTimescale: 600)) { [weak self] _ in
-                self?.player.play()
-            }
+            pendingSeek = (first, position)
         } else {
             player.play()
         }
@@ -339,19 +349,38 @@ final class StreamSession {
     func stop() {
         tokens.forEach { NotificationCenter.default.removeObserver($0) }
         tokens = []
-        observations = []
+        playerObservation = nil
+        itemObservations = [:]
         owned = []
+        pendingSeek = nil
         finished = true
     }
 
     private func makeItem() -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
         owned.append(item)
-        observations.append(item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
-            self?.fail(.itemFailed(item.error?.localizedDescription ?? "unknown error"))
-        })
+        itemObservations[ObjectIdentifier(item)] = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch item.status {
+                case .failed:
+                    self.fail(.itemFailed(item.error?.localizedDescription ?? "unknown error"))
+                case .readyToPlay:
+                    self.itemReady(item)
+                default:
+                    break
+                }
+            }
+        }
         return item
+    }
+
+    private func itemReady(_ item: AVPlayerItem) {
+        guard let pending = pendingSeek, pending.item === item else { return }
+        pendingSeek = nil
+        item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600)) { [weak self] _ in
+            self?.player.play()
+        }
     }
 
     private func owns(_ object: Any?) -> Bool {
@@ -362,19 +391,26 @@ final class StreamSession {
     private func itemEnded(_ item: AVPlayerItem?) {
         guard !finished, let item, owns(item) else { return }
         owned.removeAll { $0 === item }
-        while player.items().count < 2 {
+        itemObservations[ObjectIdentifier(item)] = nil
+        while owned.count < 2 {
             player.insert(makeItem(), after: player.items().last)
         }
     }
 
     private func stalled() {
-        guard !finished, stallStarted == nil else { return }
+        guard !finished, stallToken == nil else { return }
+        stallCounter += 1
+        let token = stallCounter
+        stallToken = token
         let started = Date()
-        stallStarted = started
         DispatchQueue.main.asyncAfter(deadline: .now() + ScreenWallpaper.stallTimeout) { [weak self] in
-            guard let self, !self.finished, self.stallStarted == started else { return }
+            guard let self, !self.finished, self.stallToken == token else { return }
             self.fail(.stalled(Date().timeIntervalSince(started)))
         }
+    }
+
+    private func clearStall() {
+        stallToken = nil
     }
 
     private func fail(_ failure: StreamFailure) {
@@ -430,7 +466,8 @@ enum StreamStill {
 
     private static func write(_ buffer: CVPixelBuffer, to file: URL) -> Bool {
         let image = CIImage(cvPixelBuffer: buffer)
-        guard let frame = CIContext().createCGImage(image, from: image.extent),
+        guard let frame = CIContext().createCGImage(image, from: image.extent, format: .RGBA8,
+                                                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!),
               let jpeg = NSBitmapImageRep(cgImage: frame)
                   .representation(using: .jpeg, properties: [.compressionFactor: 0.9])
         else { return false }
