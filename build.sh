@@ -16,6 +16,9 @@ if [[ "${1:-}" == "--test" ]]; then
     swiftc -swift-version 5 -target arm64-apple-macosx13.0 \
         -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE"/Tests/*.swift
     "$HERE/.build/tests" "$HERE/Tests/Fixtures"
+    echo "==> compiling resolve"
+    swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
+        -o "$HERE/.build/resolve" "$HERE"/Clips/*.swift "$HERE/Tools/resolve/main.swift"
     exit 0
 fi
 
