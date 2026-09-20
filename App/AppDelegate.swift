@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             syncDesktopPicture(still: still)
             return
         }
-        wallpapers.first?.grabStill(to: still) { [weak self] written in
+        wallpapers.first?.grabStill(to: still, startingAt: target.position) { [weak self] written in
             guard let self, self.stream?.url == target.url else { return }
             os_log("stream: first frame after %{public}.2f s, still %{public}@",
                   Date().timeIntervalSince(started), written ? "written" : "not written")

@@ -253,8 +253,8 @@ git commit -m "add debug launch options for streaming playback"
 - Produces:
   - `enum StreamFailure: CustomStringConvertible { case itemFailed(String), stalled(TimeInterval) }`
   - `final class StreamSession` — `init(url: URL, player: AVQueuePlayer, onFailure: @escaping (StreamFailure) -> Void)`, `func start(at position: TimeInterval)`, `func stop()`
-  - `enum StreamStill` — `static func grab(from player: AVPlayer, to file: URL, completion: @escaping (Bool) -> Void)`; `static let timeout: TimeInterval` (10)
-  - `ScreenWallpaper`: `static let stallTimeout: TimeInterval` (20), `var onStreamFailure: ((StreamFailure) -> Void)?`, `var isStreaming: Bool`, `func play(stream url: URL, at position: TimeInterval)`, `func grabStill(to file: URL, completion: @escaping (Bool) -> Void)`; `play(_:)` and `tearDown()` also end any stream.
+  - `enum StreamStill` — `static func grab(from player: AVPlayer, startingAt position: TimeInterval, to file: URL, completion: @escaping (Bool) -> Void)`; `static let timeout: TimeInterval` (10)
+  - `ScreenWallpaper`: `static let stallTimeout: TimeInterval` (20), `var onStreamFailure: ((StreamFailure) -> Void)?`, `var isStreaming: Bool`, `func play(stream url: URL, at position: TimeInterval)`, `func grabStill(to file: URL, startingAt position: TimeInterval, completion: @escaping (Bool) -> Void)`; `play(_:)` and `tearDown()` also end any stream.
 
 There are no unit tests for this task: every line talks to AVFoundation. The gate is the build plus the task review; the behaviour is exercised in Task 5.
 
@@ -460,22 +460,25 @@ enum StreamStill {
     static let timeout: TimeInterval = 10
     private static let interval: TimeInterval = 0.1
 
-    static func grab(from player: AVPlayer, to file: URL, completion: @escaping (Bool) -> Void) {
+    static func grab(from player: AVPlayer, startingAt position: TimeInterval, to file: URL,
+                     completion: @escaping (Bool) -> Void) {
         guard let item = player.currentItem else { return completion(false) }
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes:
             [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(output)
-        poll(player: player, item: item, output: output, until: Date().addingTimeInterval(timeout),
-             file: file, completion: completion)
+        poll(item: item, output: output, startingAt: position,
+             until: Date().addingTimeInterval(timeout), file: file, completion: completion)
     }
 
     /// The grab starts right after play(stream:at:), while a seek may still be pending and
-    /// currentTime() reads 0; waiting for .playing skips that frame instead of writing a
-    /// still from position zero.
-    private static func poll(player: AVPlayer, item: AVPlayerItem, output: AVPlayerItemVideoOutput,
-                             until deadline: Date, file: URL, completion: @escaping (Bool) -> Void) {
+    /// currentTime() reads 0; a frame from a clock still at zero is the one that was asked
+    /// for only when the stream was meant to start there. Playback cannot stand in for that
+    /// test: a paused wallpaper holds its player at .paused on the seeked frame for good.
+    private static func poll(item: AVPlayerItem, output: AVPlayerItemVideoOutput,
+                             startingAt position: TimeInterval, until deadline: Date, file: URL,
+                             completion: @escaping (Bool) -> Void) {
         let time = item.currentTime()
-        if player.timeControlStatus == .playing,
+        if position <= 0 || time > .zero,
            output.hasNewPixelBuffer(forItemTime: time),
            let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
             item.remove(output)
@@ -488,7 +491,8 @@ enum StreamStill {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            poll(player: player, item: item, output: output, until: deadline, file: file, completion: completion)
+            poll(item: item, output: output, startingAt: position, until: deadline,
+                 file: file, completion: completion)
         }
     }
 
@@ -571,8 +575,9 @@ with
         session.start(at: position)
     }
 
-    func grabStill(to file: URL, completion: @escaping (Bool) -> Void) {
-        StreamStill.grab(from: player, to: file, completion: completion)
+    func grabStill(to file: URL, startingAt position: TimeInterval,
+                   completion: @escaping (Bool) -> Void) {
+        StreamStill.grab(from: player, startingAt: position, to: file, completion: completion)
     }
 ```
 
@@ -638,7 +643,7 @@ git commit -m "play a looping HLS stream on the wallpaper windows"
 - Modify: `App/AppDelegate.swift` (imports, stored properties, `init`, `applicationDidFinishLaunching`, `spaceChanged`, `syncDesktopPicture`, `screensChanged`, `screensDidWake`, `startPlayback`, `applySelection`, `togglePause`, `reloadLibrary`, `restartTimer`, new `// MARK: - streaming` section), `App/main.swift` (delegate construction)
 
 **Interfaces:**
-- Consumes: `LaunchOptions` (Task 2); `ScreenWallpaper.play(stream:at:)`, `onStreamFailure`, `grabStill(to:completion:)`, `StreamFailure` (Task 3).
+- Consumes: `LaunchOptions` (Task 2); `ScreenWallpaper.play(stream:at:)`, `onStreamFailure`, `grabStill(to:startingAt:completion:)`, `StreamFailure` (Task 3).
 - Produces: `struct ClipStream { let url: URL; let position: TimeInterval; let stillID: String }`; `AppDelegate.init(options: LaunchOptions)`; private `startStream(_:)`, `streamFailed(_:)`, `restorePlayback()`, `syncDesktopPicture(still:)`, `repaintDesktopPicture()`, `stillsDirectory` — the hooks Part 4 will call from its mode machine.
 
 - [ ] **Step 1: State and construction**
@@ -866,7 +871,7 @@ Before `// MARK: - timer` add:
             syncDesktopPicture(still: still)
             return
         }
-        wallpapers.first?.grabStill(to: still) { [weak self] written in
+        wallpapers.first?.grabStill(to: still, startingAt: target.position) { [weak self] written in
             guard let self, self.stream?.url == target.url else { return }
             os_log("stream: first frame after %{public}.2f s, still %{public}@",
                   Date().timeIntervalSince(started), written ? "written" : "not written")

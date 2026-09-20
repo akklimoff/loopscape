@@ -8,22 +8,25 @@ enum StreamStill {
     static let timeout: TimeInterval = 10
     private static let interval: TimeInterval = 0.1
 
-    static func grab(from player: AVPlayer, to file: URL, completion: @escaping (Bool) -> Void) {
+    static func grab(from player: AVPlayer, startingAt position: TimeInterval, to file: URL,
+                     completion: @escaping (Bool) -> Void) {
         guard let item = player.currentItem else { return completion(false) }
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes:
             [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(output)
-        poll(player: player, item: item, output: output, until: Date().addingTimeInterval(timeout),
-             file: file, completion: completion)
+        poll(item: item, output: output, startingAt: position,
+             until: Date().addingTimeInterval(timeout), file: file, completion: completion)
     }
 
     /// The grab starts right after play(stream:at:), while a seek may still be pending and
-    /// currentTime() reads 0; waiting for .playing skips that frame instead of writing a
-    /// still from position zero.
-    private static func poll(player: AVPlayer, item: AVPlayerItem, output: AVPlayerItemVideoOutput,
-                             until deadline: Date, file: URL, completion: @escaping (Bool) -> Void) {
+    /// currentTime() reads 0; a frame from a clock still at zero is the one that was asked
+    /// for only when the stream was meant to start there. Playback cannot stand in for that
+    /// test: a paused wallpaper holds its player at .paused on the seeked frame for good.
+    private static func poll(item: AVPlayerItem, output: AVPlayerItemVideoOutput,
+                             startingAt position: TimeInterval, until deadline: Date, file: URL,
+                             completion: @escaping (Bool) -> Void) {
         let time = item.currentTime()
-        if player.timeControlStatus == .playing,
+        if position <= 0 || time > .zero,
            output.hasNewPixelBuffer(forItemTime: time),
            let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
             item.remove(output)
@@ -36,7 +39,8 @@ enum StreamStill {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            poll(player: player, item: item, output: output, until: deadline, file: file, completion: completion)
+            poll(item: item, output: output, startingAt: position, until: deadline,
+                 file: file, completion: completion)
         }
     }
 
