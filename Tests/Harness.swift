@@ -5,6 +5,7 @@ var fixturesDirectory = URL(fileURLWithPath: "Tests/Fixtures")
 private var registered: [(name: String, body: () throws -> Void)] = []
 private var failures: [String] = []
 private var running = ""
+private var temporaries: [URL] = []
 
 func test(_ name: String, _ body: @escaping () throws -> Void) {
     registered.append((name, body))
@@ -24,6 +25,7 @@ func runAll() -> Never {
         running = name
         do { try body() } catch { failures.append("\(name): threw \(error)") }
     }
+    temporaries.forEach { try? FileManager.default.removeItem(at: $0) }
     failures.forEach { print("FAIL \($0)") }
     print("\(registered.count) tests, \(failures.count) failures")
     exit(failures.isEmpty ? 0 : 1)
@@ -47,5 +49,6 @@ func temporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("loopscape-tests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    temporaries.append(directory)
     return directory
 }
