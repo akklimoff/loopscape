@@ -326,11 +326,16 @@ final class StreamSession {
         })
         playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             DispatchQueue.main.async {
+                guard let self else { return }
                 switch player.timeControlStatus {
-                case .playing, .paused:
-                    self?.clearStall()
+                case .playing:
+                    self.clearStall()
+                case .paused:
+                    // An unasked-for pause (an empty queue, a system interruption) is a stall;
+                    // pause() clears the stall itself before calling player.pause().
+                    if self.wantsPlay { self.stalled() } else { self.clearStall() }
                 case .waitingToPlayAtSpecifiedRate:
-                    self?.stalled()
+                    self.stalled()
                 default:
                     break
                 }
@@ -395,8 +400,10 @@ final class StreamSession {
         guard let pending = pendingSeek, pending.item === item else { return }
         pendingSeek = nil
         item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600)) { [weak self] _ in
-            guard let self, self.wantsPlay else { return }
-            self.player.play()
+            DispatchQueue.main.async {
+                guard let self, self.wantsPlay else { return }
+                self.player.play()
+            }
         }
     }
 
@@ -458,14 +465,18 @@ enum StreamStill {
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes:
             [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(output)
-        poll(item: item, output: output, until: Date().addingTimeInterval(timeout),
+        poll(player: player, item: item, output: output, until: Date().addingTimeInterval(timeout),
              file: file, completion: completion)
     }
 
-    private static func poll(item: AVPlayerItem, output: AVPlayerItemVideoOutput, until deadline: Date,
-                             file: URL, completion: @escaping (Bool) -> Void) {
+    /// The grab starts right after play(stream:at:), while a seek may still be pending and
+    /// currentTime() reads 0; waiting for .playing skips that frame instead of writing a
+    /// still from position zero.
+    private static func poll(player: AVPlayer, item: AVPlayerItem, output: AVPlayerItemVideoOutput,
+                             until deadline: Date, file: URL, completion: @escaping (Bool) -> Void) {
         let time = item.currentTime()
-        if output.hasNewPixelBuffer(forItemTime: time),
+        if player.timeControlStatus == .playing,
+           output.hasNewPixelBuffer(forItemTime: time),
            let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
             item.remove(output)
             completion(write(buffer, to: file))
@@ -477,7 +488,7 @@ enum StreamStill {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            poll(item: item, output: output, until: deadline, file: file, completion: completion)
+            poll(player: player, item: item, output: output, until: deadline, file: file, completion: completion)
         }
     }
 
@@ -536,15 +547,18 @@ Replace `play(_:)`
 with
 ```swift
     func play(_ url: URL) {
+        stream?.stop()
         stream = nil
         looper = nil
         player.removeAllItems()
         player.actionAtItemEnd = .none
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         player.play()
+        onStreamFailure = nil
     }
 
     func play(stream url: URL, at position: TimeInterval) {
+        stream?.stop()
         stream = nil
         looper = nil
         player.removeAllItems()
@@ -575,8 +589,9 @@ Replace `tearDown()`
 with
 ```swift
     func tearDown() {
-        player.pause()
+        stream?.stop()
         stream = nil
+        player.pause()
         looper = nil
         window.orderOut(nil)
         window.close()
@@ -606,14 +621,14 @@ git commit -m "play a looping HLS stream on the wallpaper windows"
 
 **Interfaces:**
 - Consumes: `LaunchOptions` (Task 2); `ScreenWallpaper.play(stream:at:)`, `onStreamFailure`, `grabStill(to:completion:)`, `StreamFailure` (Task 3).
-- Produces: `struct Stream { let url: URL; let position: TimeInterval; let stillID: String }`; `AppDelegate.init(options: LaunchOptions)`; private `startStream(_:)`, `streamFailed(_:)`, `restorePlayback()`, `syncDesktopPicture(still:)`, `repaintDesktopPicture()`, `stillsDirectory` — the hooks Part 4 will call from its mode machine.
+- Produces: `struct ClipStream { let url: URL; let position: TimeInterval; let stillID: String }`; `AppDelegate.init(options: LaunchOptions)`; private `startStream(_:)`, `streamFailed(_:)`, `restorePlayback()`, `syncDesktopPicture(still:)`, `repaintDesktopPicture()`, `stillsDirectory` — the hooks Part 4 will call from its mode machine.
 
 - [ ] **Step 1: State and construction**
 
 In `App/AppDelegate.swift`, above `final class AppDelegate` add:
 
 ```swift
-struct Stream {
+struct ClipStream {
     let url: URL
     let position: TimeInterval
     let stillID: String
@@ -623,7 +638,7 @@ struct Stream {
 Inside `AppDelegate`, after `private var activity: NSObjectProtocol?` add:
 
 ```swift
-    private var stream: Stream?
+    private var stream: ClipStream?
     private var desktopStill: URL?
     private let options: LaunchOptions
 ```
@@ -649,7 +664,7 @@ At the end of `applicationDidFinishLaunching`, after the last `workspace.addObse
 
 ```swift
         if let url = options.playURL {
-            startStream(Stream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
+            startStream(ClipStream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
         }
 ```
 
@@ -677,12 +692,12 @@ Replace `syncDesktopPicture`
 ```swift
     private func syncDesktopPicture(_ slug: String) {
         guard let still = poster(for: slug) else { return }
-        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+        let imageOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: imageOptions)
         }
     }
 ```
@@ -695,12 +710,12 @@ with
 
     private func syncDesktopPicture(still: URL) {
         desktopStill = still
-        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+        let imageOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: imageOptions)
         }
     }
 
@@ -781,10 +796,11 @@ After `startPlayback(_:)` add:
     }
 ```
 
-In `applySelection(_:)` add `stream = nil` as the first line:
+In `applySelection(_:)` add `stream = nil` as the first line and restart the rotation timer once a stream ends:
 
 ```swift
     private func applySelection(_ slug: String) {
+        let wasStreaming = stream != nil
         stream = nil
         currentSlug = slug
         rememberPin(slug)
@@ -792,6 +808,7 @@ In `applySelection(_:)` add `stream = nil` as the first line:
         syncDesktopPicture(slug)
         markCurrentForSaver(slug)
         refreshMenu()
+        if wasStreaming { restartTimer() }
     }
 ```
 
@@ -811,8 +828,10 @@ Before `// MARK: - timer` add:
         return caches.appendingPathComponent(bundleID).appendingPathComponent("stills")
     }
 
-    private func startStream(_ target: Stream) {
+    private func startStream(_ target: ClipStream) {
         stream = target
+        timer?.invalidate()
+        timer = nil
         if wallpapers.isEmpty { rebuildScreens() }
         let started = Date()
         for wallpaper in wallpapers {
@@ -828,7 +847,7 @@ Before `// MARK: - timer` add:
         }
         wallpapers.first?.grabStill(to: still) { [weak self] written in
             guard let self, self.stream?.url == target.url else { return }
-            NSLog("stream: first frame after %.2f s, still %@",
+            os_log("stream: first frame after %{public}.2f s, still %{public}@",
                   Date().timeIntervalSince(started), written ? "written" : "not written")
             if written { self.syncDesktopPicture(still: still) }
         }
@@ -836,8 +855,9 @@ Before `// MARK: - timer` add:
 
     private func streamFailed(_ failure: StreamFailure) {
         guard stream != nil else { return }
-        NSLog("stream: %@ — back to the pack", failure.description)
+        os_log("stream: %{public}@ — back to the pack", failure.description)
         stream = nil
+        restartTimer()
         if let slug = currentSlug {
             startPlayback(slug)
             syncDesktopPicture(slug)
