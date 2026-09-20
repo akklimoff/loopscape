@@ -10,6 +10,6 @@ if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+let delegate = AppDelegate(options: LaunchOptions.parse(CommandLine.arguments))
 app.delegate = delegate
 app.run()

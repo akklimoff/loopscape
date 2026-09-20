@@ -33,6 +33,12 @@ struct Pack: Decodable {
     var title: String { Lang.t(en, ru) }
 }
 
+struct Stream {
+    let url: URL
+    let position: TimeInterval
+    let stillID: String
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var wallpapers: [ScreenWallpaper] = []
     private var packs: [Pack] = []
@@ -46,10 +52,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var root = defaultRoot
     private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
+    private var stream: Stream?
+    private var desktopStill: URL?
+    private let options: LaunchOptions
 
     private let defaults = UserDefaults.standard
 
     private var isPaused: Bool { defaults.bool(forKey: Key.paused) }
+
+    init(options: LaunchOptions) {
+        self.options = options
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -88,6 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               name: NSWorkspace.screensDidWakeNotification, object: nil)
         workspace.addObserver(self, selector: #selector(spaceChanged),
                               name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+
+        if let url = options.playURL {
+            startStream(Stream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
+        }
     }
 
     /// Wallpaper is per space and setDesktopImageURL reaches only the active one, so a
@@ -96,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Repainting on every space change covers each space as soon as it is entered.
     @objc private func spaceChanged() {
         realign()
-        if let slug = currentSlug { syncDesktopPicture(slug) }
+        repaintDesktopPicture()
     }
 
     private func realign() {
@@ -253,6 +271,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// screen; spaceChanged repaints the others as they are entered.
     private func syncDesktopPicture(_ slug: String) {
         guard let still = poster(for: slug) else { return }
+        syncDesktopPicture(still: still)
+    }
+
+    private func syncDesktopPicture(still: URL) {
+        desktopStill = still
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
             .allowClipping: true,
@@ -260,6 +283,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for screen in NSScreen.screens {
             try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: options)
         }
+    }
+
+    private func repaintDesktopPicture() {
+        if let desktopStill { syncDesktopPicture(still: desktopStill) }
     }
 
     private func pick() -> String {
@@ -295,13 +322,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         rebuildScreens()
-        if let slug = currentSlug {
-            startPlayback(slug)
-            // A display attached after the last pack switch still shows the default system
-            // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
-            // the video — repaint the still on every geometry change, not just on switch.
-            syncDesktopPicture(slug)
-        }
+        // A display attached after the last pack switch still shows the default system
+        // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
+        // the video — repaint the still on every geometry change, not just on switch.
+        restorePlayback()
     }
 
     @objc private func screensDidSleep() {
@@ -311,16 +335,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func screensDidWake() {
         if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
             rebuildScreens()
-            if let slug = currentSlug {
-                startPlayback(slug)
-                syncDesktopPicture(slug)
-            }
+            restorePlayback()
         } else {
             realign()
             if !isPaused { wallpapers.forEach { $0.resume() } }
             // Waking repaints every screen from the wallpaper store; if a record went
             // stale while the displays slept, this is where the default would show.
-            if let slug = currentSlug { syncDesktopPicture(slug) }
+            repaintDesktopPicture()
         }
     }
 
@@ -332,13 +353,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isPaused { wallpapers.forEach { $0.pause() } }
     }
 
+    private func restorePlayback() {
+        if let stream {
+            startStream(stream)
+        } else if let slug = currentSlug {
+            startPlayback(slug)
+            syncDesktopPicture(slug)
+        }
+    }
+
     private func applySelection(_ slug: String) {
+        stream = nil
         currentSlug = slug
         rememberPin(slug)
         startPlayback(slug)
         syncDesktopPicture(slug)
         markCurrentForSaver(slug)
         refreshMenu()
+    }
+
+    // MARK: - streaming
+
+    private var stillsDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.aklimoff.loopscape"
+        return caches.appendingPathComponent(bundleID).appendingPathComponent("stills")
+    }
+
+    private func startStream(_ target: Stream) {
+        stream = target
+        if wallpapers.isEmpty { rebuildScreens() }
+        let started = Date()
+        for wallpaper in wallpapers {
+            wallpaper.onStreamFailure = { [weak self] failure in self?.streamFailed(failure) }
+            wallpaper.play(stream: target.url, at: target.position)
+        }
+        if isPaused { wallpapers.forEach { $0.pause() } }
+
+        let still = stillsDirectory.appendingPathComponent("\(target.stillID).jpg")
+        if FileManager.default.fileExists(atPath: still.path) {
+            syncDesktopPicture(still: still)
+            return
+        }
+        wallpapers.first?.grabStill(to: still) { [weak self] written in
+            guard let self, self.stream?.url == target.url else { return }
+            NSLog("stream: first frame after %.2f s, still %@",
+                  Date().timeIntervalSince(started), written ? "written" : "not written")
+            if written { self.syncDesktopPicture(still: still) }
+        }
+    }
+
+    private func streamFailed(_ failure: StreamFailure) {
+        guard stream != nil else { return }
+        NSLog("stream: %@ — back to the pack", failure.description)
+        stream = nil
+        if let slug = currentSlug {
+            startPlayback(slug)
+            syncDesktopPicture(slug)
+        } else if !packs.isEmpty {
+            applySelection(pick())
+        } else {
+            wallpapers.forEach { $0.tearDown() }
+            wallpapers = []
+        }
     }
 
     // MARK: - timer
@@ -564,7 +642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             wallpapers.forEach { $0.pause() }
         } else {
             wallpapers.forEach { $0.resume() }
-            if let slug = currentSlug { syncDesktopPicture(slug) }
+            repaintDesktopPicture()
         }
         restartTimer()
         refreshMenu()
