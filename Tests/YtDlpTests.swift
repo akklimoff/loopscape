@@ -36,6 +36,30 @@ func ytDlpTests() {
         expectEqual(YtDlp.expiry(of: plain), nil)
     }
 
+    test("parseStream takes the deadline the URL carries") {
+        let line = "https://rr2---sn.googlevideo.com/videoplayback?expire=1790000123&ei=abc\n"
+        let stream = try YtDlp.parseStream(Data(line.utf8), now: Date(timeIntervalSince1970: 1_780_000_000))
+        expectEqual(stream.url, URL(string: "https://rr2---sn.googlevideo.com/videoplayback?expire=1790000123&ei=abc")!)
+        expectEqual(stream.expires, Date(timeIntervalSince1970: 1_790_000_123))
+    }
+
+    test("parseStream falls back to an hour from now when the URL carries none") {
+        let clock = Date(timeIntervalSince1970: 1_780_000_000)
+        let stream = try YtDlp.parseStream(Data("  https://example.com/video.m3u8  ".utf8), now: clock)
+        expectEqual(stream.url, URL(string: "https://example.com/video.m3u8")!)
+        expectEqual(stream.expires, clock + 3600)
+    }
+
+    test("parseStream reports a non-https line and empty output as tool failures") {
+        for output in ["ERROR: Requested format is not available", ""] {
+            do {
+                _ = try YtDlp.parseStream(Data(output.utf8), now: Date(timeIntervalSince1970: 0))
+                expect(false, "expected a throw for \(output)")
+            } catch ClipError.toolFailed {
+            }
+        }
+    }
+
     test("locate returns the first directory holding an executable yt-dlp") {
         let empty = try temporaryDirectory()
         let holder = try temporaryDirectory()

@@ -18,6 +18,7 @@ protocol ClipSource {
 
 struct YtDlp: ClipSource {
     static let minimumHeight = 480
+    static let timeout: TimeInterval = 20
 
     /// H.264 only: AVFoundation does not play VP9, and AV1 has no hardware decoder before M3.
     /// HLS only: the https DASH variants take ~14 s to start and report a doubled duration.
@@ -27,10 +28,13 @@ struct YtDlp: ClipSource {
     static let homebrewDirectories = ["/opt/homebrew/bin", "/usr/local/bin"]
 
     let executable: URL
+    private let now: () -> Date
 
-    init(directories: [String] = YtDlp.defaultDirectories()) throws {
+    init(directories: [String] = YtDlp.defaultDirectories(),
+         now: @escaping () -> Date = Date.init) throws {
         guard let found = YtDlp.locate(in: directories) else { throw ClipError.toolMissing }
         executable = found
+        self.now = now
     }
 
     static func defaultDirectories() -> [String] {
@@ -51,11 +55,7 @@ struct YtDlp: ClipSource {
     func stream(videoID: String) throws -> ClipStream {
         let output = try run(["-f", YtDlp.format, "--print", "url",
                               "https://www.youtube.com/watch?v=\(videoID)"])
-        let line = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: line), url.scheme == "https" else {
-            throw ClipError.toolFailed("unexpected output: \(line.prefix(200))")
-        }
-        return ClipStream(url: url, expires: YtDlp.expiry(of: url) ?? Date().addingTimeInterval(3600))
+        return try YtDlp.parseStream(output, now: now())
     }
 
     static func parseSearch(_ data: Data) throws -> [Candidate] {
@@ -65,6 +65,14 @@ struct YtDlp: ClipSource {
         } catch {
             throw ClipError.toolFailed("unreadable search result: \(error)")
         }
+    }
+
+    static func parseStream(_ data: Data, now: Date) throws -> ClipStream {
+        let line = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: line), url.scheme == "https" else {
+            throw ClipError.toolFailed("unexpected output: \(line.prefix(200))")
+        }
+        return ClipStream(url: url, expires: expiry(of: url) ?? now.addingTimeInterval(3600))
     }
 
     /// googlevideo URLs carry their own deadline, as "/expire/<unix>/" in HLS manifests and
@@ -89,7 +97,8 @@ struct YtDlp: ClipSource {
     private func run(_ arguments: [String]) throws -> Data {
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["--no-warnings", "--socket-timeout", "10"] + arguments
+        process.arguments = ["--no-warnings", "--ignore-config", "--socket-timeout", "10",
+                             "--retries", "1", "--extractor-retries", "1"] + arguments
         process.environment = YtDlp.environment(for: executable,
                                                 inherited: ProcessInfo.processInfo.environment)
 
@@ -98,9 +107,34 @@ struct YtDlp: ClipSource {
         process.standardOutput = output
         process.standardError = errors
         do { try process.run() } catch { throw ClipError.toolMissing }
+
+        // yt-dlp retries on its own and runs YouTube's player JS in a separate runtime, and
+        // --socket-timeout bounds neither, so the run needs a deadline of its own.
+        let lock = NSLock()
+        var expired = false
+        let watchdog = DispatchWorkItem {
+            lock.lock()
+            defer { lock.unlock() }
+            guard process.isRunning else { return }
+            expired = true
+            process.terminate()
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + YtDlp.timeout, execute: watchdog)
+
+        var complaint = ""
+        let reading = DispatchGroup()
+        DispatchQueue.global().async(group: reading) {
+            complaint = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        let complaint = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        reading.wait()
         process.waitUntilExit()
+        watchdog.cancel()
+
+        lock.lock()
+        let timedOut = expired
+        lock.unlock()
+        if timedOut { throw ClipError.toolFailed("yt-dlp timed out after 20 s") }
 
         guard process.terminationStatus == 0 else {
             let gone = ["Requested format is not available", "Video unavailable", "Private video"]
