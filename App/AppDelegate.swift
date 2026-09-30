@@ -17,6 +17,7 @@ private enum Key {
     static let minutes = "rotateMinutes"
     static let loginAsked = "loginItemDecided"
     static let paused = "paused"
+    static let clips = "spotifyClips"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -57,10 +58,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var desktopStill: URL?
     private let options: LaunchOptions
     private let nowPlaying = NowPlaying()
+    private var clipMode = ClipMode(isEnabled: false)
+    private var resolver: ClipResolver?
+    private let clipQueue = DispatchQueue(label: "com.aklimoff.loopscape.clips")
 
     private let defaults = UserDefaults.standard
 
     private var isPaused: Bool { defaults.bool(forKey: Key.paused) }
+
+    /// Spotify's pause holds a clip still the way the menu's Pause holds everything.
+    private var shouldPlay: Bool { !isPaused && clipMode.clipPlayback?.paused != true }
 
     init(options: LaunchOptions) {
         self.options = options
@@ -91,11 +98,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reloadLibrary()
         watchLibrary()
 
+        resolver = ClipResolver(store: ClipStore(file: root.appendingPathComponent("clips.json")),
+                                source: OnDemandYtDlp())
+        apply(clipMode.setEnabled(defaults.bool(forKey: Key.clips)))
+
         nowPlaying.onChange = { [weak self] track in
+            guard let self else { return }
             os_log("now playing: %{public}@", track.map {
                 "\($0.menuTitle), \($0.isPlaying ? "playing" : "paused") at \(Int($0.position)) s"
             } ?? "nothing")
-            self?.refreshMenu()
+            self.apply(self.clipMode.trackChanged(track))
+            self.refreshMenu()
         }
         nowPlaying.start()
 
@@ -358,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             restorePlayback()
         } else {
             realign()
-            if !isPaused { wallpapers.forEach { $0.resume() } }
+            if shouldPlay { wallpapers.forEach { $0.resume() } }
             // Waking repaints every screen from the wallpaper store; if a record went
             // stale while the displays slept, this is where the default would show.
             repaintDesktopPicture()
@@ -375,7 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func restorePlayback() {
         if let stream {
-            startStream(stream)
+            let position = clipMode.clipPlayback?.position ?? stream.position
+            startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID))
         } else if let slug = currentSlug {
             startPlayback(slug)
             syncDesktopPicture(slug)
@@ -413,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             wallpaper.onStreamFailure = { [weak self] failure in self?.streamFailed(failure) }
             wallpaper.play(stream: target.url, at: target.position)
         }
-        if isPaused { wallpapers.forEach { $0.pause() } }
+        if !shouldPlay { wallpapers.forEach { $0.pause() } }
 
         let still = stillsDirectory.appendingPathComponent("\(target.stillID).jpg")
         if FileManager.default.fileExists(atPath: still.path) {
@@ -431,6 +445,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func streamFailed(_ failure: StreamFailure) {
         guard stream != nil else { return }
         os_log("stream: %{public}@ — back to the pack", failure.description)
+        leaveStream()
+        apply(clipMode.streamFailed())
+    }
+
+    private func leaveStream() {
+        guard stream != nil else { return }
         stream = nil
         restartTimer()
         if let slug = currentSlug {
@@ -441,6 +461,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             wallpapers.forEach { $0.tearDown() }
             wallpapers = []
+        }
+    }
+
+    // MARK: - Spotify clips
+
+    private func apply(_ effects: [ClipEffect]) {
+        for effect in effects {
+            switch effect {
+            case .resolve(let query, let generation):
+                resolveClip(query, generation: generation)
+            case .play(let videoID, let url, let position):
+                os_log("clip: %{public}@ from %{public}.1f s", videoID, position)
+                startStream(StreamTarget(url: url, position: position, stillID: videoID))
+            case .pause:
+                if stream != nil { wallpapers.forEach { $0.pause() } }
+            case .resume:
+                if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
+            case .leave:
+                os_log("clip: back to the pack")
+                leaveStream()
+            }
+        }
+    }
+
+    /// A resolve blocks for seconds, so resolves queue up behind each other during fast
+    /// skipping; each one re-checks on main that it is still wanted before it starts, so the
+    /// queue never works through a backlog of tracks that are already gone.
+    private func resolveClip(_ query: TrackQuery, generation: Int) {
+        guard let resolver else { return }
+        clipQueue.async { [weak self] in
+            let wanted = DispatchQueue.main.sync { self?.clipMode.isCurrent(generation) ?? false }
+            guard wanted else { return }
+            os_log("clip: resolving %{public}@ — %{public}@", query.artist, query.name)
+            let outcome: ResolveOutcome
+            do {
+                switch try resolver.resolve(query) {
+                case .stream(let videoID, let url): outcome = .found(videoID: videoID, url: url)
+                case .none: outcome = .notFound
+                }
+            } catch {
+                os_log("clip: resolve failed: %{public}@", String(describing: error))
+                outcome = .failed
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if outcome == .notFound {
+                    os_log("clip: no video for %{public}@ — %{public}@", query.artist, query.name)
+                }
+                self.apply(self.clipMode.resolved(outcome, generation: generation))
+            }
         }
     }
 
@@ -577,6 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pause.target = self
         pause.state = isPaused ? .on : .off
         menu.addItem(pause)
+        appendClipItems(to: menu)
 
         menu.addItem(revealItem())
         menu.addItem(loginItem())
@@ -593,6 +664,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
     }
 
+    private func appendClipItems(to menu: NSMenu) {
+        let clips = NSMenuItem(title: Lang.t("Spotify clips", "Клипы из Spotify"),
+                               action: #selector(toggleClips), keyEquivalent: "")
+        clips.target = self
+        clips.state = clipMode.isEnabled ? .on : .off
+        menu.addItem(clips)
+        guard clipMode.isEnabled, YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
+        let hint = NSMenuItem(title: Lang.t("Needs yt-dlp: brew install yt-dlp",
+                                            "Нужен yt-dlp: brew install yt-dlp"),
+                              action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        menu.addItem(hint)
+    }
+
     private func appendEmptyState(to menu: NSMenu) {
         let hint = NSMenuItem(title: Lang.t("No wallpapers yet — drop clips in the folder below",
                                             "Обоев пока нет — положи ролики в папку ниже"),
@@ -600,6 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hint.isEnabled = false
         menu.addItem(hint)
         menu.addItem(revealItem())
+        appendClipItems(to: menu)
         menu.addItem(.separator())
         menu.addItem(loginItem())
         menu.addItem(.separator())
@@ -676,10 +762,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isPaused {
             wallpapers.forEach { $0.pause() }
         } else {
-            wallpapers.forEach { $0.resume() }
+            if shouldPlay { wallpapers.forEach { $0.resume() } }
             repaintDesktopPicture()
         }
         restartTimer()
+        refreshMenu()
+    }
+
+    @objc private func toggleClips() {
+        let enabled = !clipMode.isEnabled
+        defaults.set(enabled, forKey: Key.clips)
+        apply(clipMode.setEnabled(enabled))
         refreshMenu()
     }
 
