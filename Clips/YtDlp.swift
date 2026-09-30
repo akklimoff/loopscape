@@ -144,3 +144,17 @@ struct YtDlp: ClipSource {
         return data
     }
 }
+
+/// yt-dlp may be installed while the app runs, so it is looked up on every call rather than
+/// once at launch.
+struct OnDemandYtDlp: ClipSource {
+    var directories: () -> [String] = YtDlp.defaultDirectories
+
+    func search(_ query: String) throws -> [Candidate] {
+        try YtDlp(directories: directories()).search(query)
+    }
+
+    func stream(videoID: String) throws -> ClipStream {
+        try YtDlp(directories: directories()).stream(videoID: videoID)
+    }
+}

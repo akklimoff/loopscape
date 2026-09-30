@@ -46,7 +46,7 @@ fi
 
 echo "==> compiling"
 swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
-    -o "$HERE/.build/${APP_NAME}" "$HERE"/App/*.swift
+    -o "$HERE/.build/${APP_NAME}" "$HERE"/App/*.swift "$HERE"/Clips/*.swift
 
 SAVER_NAME="${APP_NAME}Saver"
 echo "==> compiling screen saver"

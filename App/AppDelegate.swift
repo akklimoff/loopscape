@@ -34,7 +34,7 @@ struct Pack: Decodable {
     var title: String { Lang.t(en, ru) }
 }
 
-struct ClipStream {
+struct StreamTarget {
     let url: URL
     let position: TimeInterval
     let stillID: String
@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var root = defaultRoot
     private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
-    private var stream: ClipStream?
+    private var stream: StreamTarget?
     private var desktopStill: URL?
     private let options: LaunchOptions
     private let nowPlaying = NowPlaying()
@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
         if let url = options.playURL {
-            startStream(ClipStream(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
+            startStream(StreamTarget(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
         }
     }
 
@@ -403,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return caches.appendingPathComponent(bundleID).appendingPathComponent("stills")
     }
 
-    private func startStream(_ target: ClipStream) {
+    private func startStream(_ target: StreamTarget) {
         stream = target
         timer?.invalidate()
         timer = nil
