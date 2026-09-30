@@ -14,7 +14,7 @@ if [[ "${1:-}" == "--test" ]]; then
     mkdir -p "$HERE/.build"
     echo "==> compiling tests"
     swiftc -swift-version 5 -target arm64-apple-macosx13.0 \
-        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE/App/LaunchOptions.swift" "$HERE"/Tests/*.swift
+        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE/App/LaunchOptions.swift" "$HERE/App/Track.swift" "$HERE"/Tests/*.swift
     "$HERE/.build/tests" "$HERE/Tests/Fixtures"
     echo "==> compiling resolve"
     swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
