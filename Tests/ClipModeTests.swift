@@ -147,4 +147,20 @@ func clipModeTests() {
         expectEqual(restored.trackChanged(track(playing: false)), [])
         expectEqual(restored.trackChanged(track(playing: true)), [.resolve(query(), generation: 2)])
     }
+
+    test("a failed resolve is retried when the same track resumes") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.resolved(.failed, generation: 1), [])
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
+        expectEqual(mode.trackChanged(track(at: 40)), [.resolve(query(), generation: 2)])
+    }
+
+    test("a track with no video is not searched again on resume") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.notFound, generation: 1)
+        _ = mode.trackChanged(track(at: 40, playing: false))
+        expectEqual(mode.trackChanged(track(at: 40)), [])
+    }
 }

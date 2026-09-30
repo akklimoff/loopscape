@@ -20,6 +20,9 @@ struct ClipMode {
         case resolving(trackID: String, generation: Int)
         case showing(trackID: String)
         case missing(trackID: String)
+        /// A network or tool failure says nothing about the track, so the next play event of
+        /// the same track tries again.
+        case failed(trackID: String)
     }
 
     private(set) var isEnabled: Bool
@@ -70,6 +73,8 @@ struct ClipMode {
                 return new.isPlaying ? start(new) : []
             case .missing:
                 return []
+            case .failed:
+                return new.isPlaying ? start(new) : []
             }
         }
         guard new.isPlaying else { return leave() }
@@ -84,8 +89,11 @@ struct ClipMode {
             phase = .showing(trackID: trackID)
             clipOnScreen = true
             return [.play(videoID: videoID, url: url, position: position(of: track))]
-        case .notFound, .failed:
+        case .notFound:
             phase = .missing(trackID: trackID)
+            return takeClipOff()
+        case .failed:
+            phase = .failed(trackID: trackID)
             return takeClipOff()
         }
     }
