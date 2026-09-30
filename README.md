@@ -81,14 +81,34 @@ disappears.
 ## Menu
 
 The status item is the entire interface: pick a pack, set the rotation interval (5 / 15 /
-30 / 60 minutes, or off), jump to the next one, open the wallpapers folder, toggle **Launch at
-login**, quit. With an interval set, choosing a pack shows it now and restarts the countdown; with the
+30 / 60 minutes, or off), jump to the next one, open the wallpapers folder, toggle **Spotify
+clips** and **Launch at login**, quit. With an interval set, choosing a pack shows it now and restarts the countdown; with the
 interval off, whatever is showing is kept across restarts.
 
 Launch at login is on by default and is backed by `SMAppService`, so it shows up in System
 Settings under Login Items. Unchecking it there and in the menu are the same switch.
 
 The UI is Russian when the system's primary language is Russian, English otherwise.
+
+## Spotify clips
+
+With **Spotify clips** ticked in the menu, the track playing in the Spotify desktop app
+brings its music video onto every display, from where the track is. Pause in Spotify
+pauses the video; skip, stop or quit, or a track without a video, and the regular packs
+come back. It is off by default.
+
+It needs `yt-dlp` from Homebrew (`brew install yt-dlp`, which also installs the `deno`
+runtime it uses); the menu says so when it cannot find it. Videos are found on YouTube and
+streamed, never downloaded; the only thing kept on disk is which video belongs to which
+track, in `clips.json` beside the wallpapers folder — edit an entry there to correct a
+wrong match, or delete it to search again.
+
+**Terms of service:** fetching video from YouTube through `yt-dlp` is against YouTube's
+terms of service. The feature ships switched off; turning it on is your call.
+
+Limitations: Loopscape learns about a track from Spotify's play/pause/skip events, so one
+started before Loopscape shows up at the next such event; scrubbing within a track is not
+followed.
 
 ## Lock screen
 

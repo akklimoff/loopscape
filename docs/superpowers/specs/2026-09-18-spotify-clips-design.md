@@ -197,6 +197,10 @@ there.
 - Every resolve carries a generation counter; a result for a track that is no longer current
   is dropped, so fast skipping never flashes intermediate clips.
 - `current.txt` keeps naming the last regular pack — the screen saver cannot stream.
+- The mode machine is `App/ClipMode.swift`, pure and unit-tested: a clip starts only for a
+  playing track; a new track keeps the old clip until it resolves, then switches once; a new
+  track arriving paused, stop, quit or the checkbox off take the clip down; a failed stream is
+  re-resolved once.
 - Menu: a "Spotify clips" checkbox (off by default), a disabled "♪ Artist — Title" line while
   a track is known, and the `yt-dlp` install hint when it is missing.
 
@@ -277,6 +281,25 @@ Manual scenario run, each step with its expected result:
    are found without the shell's `PATH`).
 10. With `yt-dlp` out of reach → the menu shows the install hint, nothing crashes.
 
+Result (2026-09-30, Spotify 1.3.0.277, yt-dlp 2026.08.19, dev build driven by AppleScript
+and then by the owner's own listening):
+
+- Step 1: track event → `clip:` line 3.7–4.5 s (a new search or a mapping hit alike, since the
+  stream URL is resolved fresh), first frame 1.1–1.9 s later, starting at the track's position
+  (e.g. 3.8 s in); the desktop picture becomes the clip's still.
+- Step 2: five skips 0.7 s apart ran two resolves (the first, already running, and the last);
+  the three in between were voided before starting, and only the last track's clip appeared.
+- Step 3: a track mapped to "none" gave way at once (`no video` 1 ms after `resolving`) and
+  the desktop picture went back to the pack's poster; tracks with no video found by search
+  answered in ~2 s.
+- Step 4: Spotify's pause froze the clip at 21.9 s against the track's 22 s; play resumed it.
+- Step 7: with a 1-minute interval the pack rotated every minute on the pack and not once in
+  6 minutes of consecutive clips.
+- Step 9: every launch used `open`, so each resolve found `yt-dlp` and `deno` without the
+  shell's `PATH`.
+- Steps 5, 6, 8 and 10 go to the owner UX pass below; step 5 was left because the owner was
+  listening to Spotify by then.
+
 README gains the feature section, the `yt-dlp` dependency and the terms-of-service note.
 Only after all ten steps and the owner UX pass below: tag `v2.0` and build the DMG.
 
@@ -313,6 +336,19 @@ Deferred from Part 1:
 - The "♪ Artist — Title" line by eye: at the top of the menu, disabled, follows skip, pause
   and quit when the menu is reopened; long titles end in "…". With the menu held open across
   a track start or stop, the rows below shift by one line — acceptable, or rebuild only on open.
+
+Deferred from Part 4:
+
+- Quit Spotify during a clip: the pack returns.
+- Untick "Spotify clips" mid-clip: the pack returns at once.
+- Lock the Mac during a clip: the screen saver plays a regular pack.
+- With `yt-dlp` out of reach (e.g. `brew unlink yt-dlp`), the menu shows the install hint and
+  nothing crashes; after `brew link yt-dlp` the hint is gone at the next menu open.
+- The "Spotify clips" checkbox and hint by eye, in English and Russian.
+- The switch between tracks: the old clip keeps playing for the few seconds the next one
+  resolves — acceptable, or show the pack meanwhile.
+- A scrub in Spotify: the clip keeps its own time — acceptable for 2.0, or poll the position.
+- Match quality on your own library: wrong videos go into `clips.json` by hand.
 
 Observed while running Part 3, to judge and decide:
 
