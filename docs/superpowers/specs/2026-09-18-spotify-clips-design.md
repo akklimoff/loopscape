@@ -105,7 +105,8 @@ Built code at `5906cc0`, one built-in display, yt-dlp 2026.08.19, deno 2.9.7, ma
 | Loop seam | position runs 211.1 → 0 → 6.0 s at rate 1.0, no stall, no fallback |
 | Empty library while streaming | stream keeps playing, no crash |
 | Bytes in, one display, 60 s window ~70 s into playback | 0.268 MB/s ≈ 2.1 Mbit/s (idle 0.002 MB/s) |
-| RSS while streaming | ~110 MB over a 60 s window; hour run: 152 → 249 MB in the first 5 min, then flat; ~57 MB on a pack |
+| RSS while streaming | ~110 MB over a 60 s window; hour run: 152 → 249 MB in the first 5 min, then 249–251 MB for the rest of the hour; ~57 MB on a pack |
+| Hour-long loop | 13 samples over 60 min: always playing, position advancing across 16 seams, no fallback |
 | CPU | not attributable: AVFoundation decodes out of process; the app itself shows 2–4 % streaming or on a pack |
 | Unreachable URL → pack | 0.24 s, `item failed: Could not connect to the server.` |
 | Expired URL → pack | 0.76 s, `item failed: You do not have permission…` (CDN 403) |
@@ -223,6 +224,12 @@ every part leaves a shippable app.
 - Manual: launch Loopscape mid-track — no line until the next event (the accepted limitation,
   confirmed rather than assumed).
 
+Result (2026-09-30, Spotify 1.3.0.277, driven by AppleScript against the dev build): each
+play, pause and skip logged its `now playing:` line 0.17–0.67 s after the action. Quitting
+Spotify logged `now playing: nothing` 0.24 s later. Launching Spotify posted one `paused`
+event for the track restored from its last session. A Loopscape launched mid-track logged
+nothing for 5 s and picked the track up at the next pause.
+
 ### Part 2 — ClipResolver
 
 - `./build.sh --test` builds and runs a small test executable (plain `swiftc`, no Xcode).
@@ -300,6 +307,12 @@ Deferred from Part 3:
 - Wi-Fi off for 30 s mid-stream: the pack returns after ~20 s, log shows `stalled for 20 s`.
 - Two displays, if one is at hand: bandwidth ≈ 2× one display; drift between the pictures.
 - Menu bar strip across hard scene cuts: acceptable, or pick a remedy (see "Open risk").
+
+Deferred from Part 1:
+
+- The "♪ Artist — Title" line by eye: at the top of the menu, disabled, follows skip, pause
+  and quit when the menu is reopened; long titles end in "…". With the menu held open across
+  a track start or stop, the rows below shift by one line — acceptable, or rebuild only on open.
 
 Observed while running Part 3, to judge and decide:
 
