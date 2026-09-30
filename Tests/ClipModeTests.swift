@@ -123,6 +123,21 @@ func clipModeTests() {
         expectEqual(mode.resolved(.found(videoID: "b", url: url), generation: 2), [])
     }
 
+    test("a pack picked from the menu mid-clip holds until the next track") {
+        var mode = showing()
+        mode.packChosen()
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
+        expect(mode.clipPlayback == nil, "the pack is on screen, not a clip")
+        expectEqual(mode.trackChanged(track(at: 40, playing: true)), [])
+        expectEqual(mode.trackChanged(track("spotify:track:B")),
+                    [.resolve(query("spotify:track:B"), generation: 3)])
+
+        var resolving = ClipMode(isEnabled: true)
+        _ = resolving.trackChanged(track())
+        resolving.packChosen()
+        expectEqual(resolving.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1), [])
+    }
+
     test("switching clips on mid-track, or playing a restored track, starts a resolve") {
         var mode = ClipMode(isEnabled: false)
         _ = mode.trackChanged(track())

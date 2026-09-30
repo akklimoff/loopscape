@@ -734,6 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// over; with the interval off it is the pack that survives the next launch.
     @objc private func choosePack(_ sender: NSMenuItem) {
         guard let slug = sender.representedObject as? String else { return }
+        clipMode.packChosen()
         defaults.set(false, forKey: Key.paused)
         restartTimer()
         applySelection(slug)
@@ -778,6 +779,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func nextPack() {
         guard packs.count > 1 else { return }
+        clipMode.packChosen()
         defaults.set(false, forKey: Key.paused)
         restartTimer()
         let index = packs.firstIndex { $0.slug == currentSlug } ?? -1

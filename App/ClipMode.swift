@@ -90,6 +90,14 @@ struct ClipMode {
         }
     }
 
+    /// A pack picked from the menu replaces the clip, and the track playing now does not bring
+    /// it back; the next track does.
+    mutating func packChosen() {
+        generation += 1
+        clipOnScreen = false
+        phase = track.map { .missing(trackID: $0.id) } ?? .idle
+    }
+
     /// Called after the wallpaper has already fallen back to the pack.
     mutating func streamFailed() -> [ClipEffect] {
         guard case .showing(let trackID) = phase, let track else { return [] }
