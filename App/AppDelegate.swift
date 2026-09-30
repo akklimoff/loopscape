@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var stream: ClipStream?
     private var desktopStill: URL?
     private let options: LaunchOptions
+    private let nowPlaying = NowPlaying()
 
     private let defaults = UserDefaults.standard
 
@@ -89,6 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buildStatusItem()
         reloadLibrary()
         watchLibrary()
+
+        nowPlaying.onChange = { [weak self] track in
+            os_log("now playing: %{public}@", track.map {
+                "\($0.menuTitle), \($0.isPlaying ? "playing" : "paused") at \(Int($0.position)) s"
+            } ?? "nothing")
+            self?.refreshMenu()
+        }
+        nowPlaying.start()
 
         NotificationCenter.default.addObserver(
             self,
@@ -518,6 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshMenu() {
         guard let menu = statusItem?.menu else { return }
         menu.removeAllItems()
+        appendNowPlaying(to: menu)
 
         guard !packs.isEmpty else {
             appendEmptyState(to: menu)
@@ -573,6 +583,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(versionItem())
         menu.addItem(quitItem())
+    }
+
+    private func appendNowPlaying(to menu: NSMenu) {
+        guard let track = nowPlaying.track else { return }
+        let item = NSMenuItem(title: track.menuTitle, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        menu.addItem(item)
+        menu.addItem(.separator())
     }
 
     private func appendEmptyState(to menu: NSMenu) {
