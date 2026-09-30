@@ -53,6 +53,11 @@ enum ClipMatching {
         "trailer", "behind the scenes", "making of", "hour", "hours", "tutorial", "lesson",
     ].map(normalize)
 
+    /// A cover band's own videos are all covers, so the word only counts against strangers.
+    private static let forgivenOnArtistChannel = ["cover", "кавер"].map(normalize)
+
+    private static let qualityMarkers = ["remaster", "remastered", "4k", "hd", "hq", "1080p"].map(normalize)
+
     /// Lowercased, diacritics folded, punctuation turned into single spaces — so "МакSим",
     /// "P!nk" and "Beyoncé" compare equal however a title decorates them.
     static func normalize(_ text: String) -> String {
@@ -77,8 +82,18 @@ enum ClipMatching {
         "\(track.artist) \(cleanTrackName(track.name)) official video"
     }
 
+    /// Spotify joins a track's artists with ", "; video titles and channels name the first.
+    static func primaryArtist(_ artist: String) -> String {
+        artist.components(separatedBy: ", ").first ?? artist
+    }
+
     /// nil means the candidate is ruled out, not merely weak.
     static func score(_ candidate: Candidate, for track: TrackQuery) -> Int? {
+        guard let assessment = assess(candidate, for: track) else { return nil }
+        return assessment.points >= threshold ? assessment.points : nil
+    }
+
+    private static func assess(_ candidate: Candidate, for track: TrackQuery) -> (points: Int, bareTitle: Bool)? {
         guard let duration = candidate.duration else { return nil }
         if track.seconds > 0 {
             guard (0.5...2.0).contains(duration / Double(track.seconds)) else { return nil }
@@ -87,7 +102,7 @@ enum ClipMatching {
         let title = " \(normalize(candidate.title)) "
         let channel = normalize(candidate.channel ?? "")
         let name = normalize(cleanTrackName(track.name))
-        let artist = normalize(track.artist)
+        let artist = normalize(primaryArtist(track.artist))
         let channelIsArtist = isArtistChannel(channel, artist: artist)
 
         guard !channel.hasSuffix(" topic") else { return nil }
@@ -100,7 +115,10 @@ enum ClipMatching {
         for own in [name, artist] {
             if let range = rest.range(of: " \(own) ") { rest.replaceSubrange(range, with: " ") }
         }
-        guard !rejectedWords.contains(where: { rest.contains(" \($0) ") }) else { return nil }
+        let rejected = channelIsArtist
+            ? rejectedWords.filter { !forgivenOnArtistChannel.contains($0) }
+            : rejectedWords
+        guard !rejected.contains(where: { rest.contains(" \($0) ") }) else { return nil }
 
         var score = 0
         let whole = NSRange(title.startIndex..., in: title)
@@ -109,23 +127,29 @@ enum ClipMatching {
         if channelIsArtist { score += 3 }
         if candidate.isVerified { score += 1 }
         if track.seconds > 0, abs(duration - Double(track.seconds)) <= 10 { score += 1 }
-        return score >= threshold ? score : nil
+        if qualityMarkers.contains(where: { rest.contains(" \($0) ") }) { score += 1 }
+        return (score, rest.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
-    /// Ties go to YouTube's own ranking, which is why the first best score wins.
+    /// Ties go to YouTube's own ranking, which is why the first best score wins. With no
+    /// winner, YouTube's top hit is still taken when a verified channel titled it with nothing
+    /// but artist and name — the shape of a label's upload, which carries no other marker.
     static func pick(for track: TrackQuery, from candidates: [Candidate]) -> Candidate? {
         var best: (candidate: Candidate, score: Int)?
         for candidate in candidates {
             guard let score = score(candidate, for: track) else { continue }
             if best == nil || score > best!.score { best = (candidate, score) }
         }
-        return best?.candidate
+        if let best { return best.candidate }
+        guard let top = candidates.first, top.isVerified,
+              assess(top, for: track)?.bareTitle == true else { return nil }
+        return top
     }
 
     private static func isArtistChannel(_ channel: String, artist: String) -> Bool {
         let compactChannel = channel.replacingOccurrences(of: " ", with: "")
         let compactArtist = artist.replacingOccurrences(of: " ", with: "")
         guard !compactArtist.isEmpty else { return false }
-        return ["", "vevo", "official"].contains { compactChannel == compactArtist + $0 }
+        return ["", "vevo", "official", "music"].contains { compactChannel == compactArtist + $0 }
     }
 }

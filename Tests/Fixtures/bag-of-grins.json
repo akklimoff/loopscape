@@ -1,0 +1,42 @@
+{
+  "artist": "Red Hot Chili Peppers",
+  "name": "Bag of Grins",
+  "seconds": 306,
+  "candidates": [
+    {
+      "id": "QyUx2sj3hfM",
+      "title": "Red Hot Chili Peppers - Bag of Grins (Official Audio)",
+      "channel": "Red Hot Chili Peppers",
+      "duration": 306,
+      "channel_is_verified": true
+    },
+    {
+      "id": "ArYw6-6qKwM",
+      "title": "Red Hot Chili Peppers - It's Only Natural (Official Audio)",
+      "channel": "Red Hot Chili Peppers",
+      "duration": 334,
+      "channel_is_verified": true
+    },
+    {
+      "id": "FS-9_w2XMt8",
+      "title": "Red Hot Chili Peppers - Bag of Grins Video - Return of the Dream Canteen - Subtitles",
+      "channel": "Jarvi Ron",
+      "duration": 308,
+      "channel_is_verified": null
+    },
+    {
+      "id": "lc07O8EfTGw",
+      "title": "**Bag of Grins** Red Hot Chili Peppers #redhotchilipeppers",
+      "channel": "AboutaGirlNamedJessie",
+      "duration": 306,
+      "channel_is_verified": null
+    },
+    {
+      "id": "NmVB51sHiT4",
+      "title": "Red Hot Chili Peppers - Bag of Grins Lyrics",
+      "channel": "BLACKSOUP Lyrics",
+      "duration": 300,
+      "channel_is_verified": null
+    }
+  ]
+}

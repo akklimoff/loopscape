@@ -1,0 +1,42 @@
+{
+  "artist": "Bring Me The Horizon",
+  "name": "It Never Ends",
+  "seconds": 274,
+  "candidates": [
+    {
+      "id": "E_Vez_aKIyI",
+      "title": "Bring Me The Horizon - \"It Never Ends\"",
+      "channel": "Epitaph Records",
+      "duration": 281,
+      "channel_is_verified": true
+    },
+    {
+      "id": "8-iH7XYt1vk",
+      "title": "Bring Me The Horizon It Never Ends BBC Radio 1 Live Lounge 2011",
+      "channel": "deay1752",
+      "duration": 336,
+      "channel_is_verified": null
+    },
+    {
+      "id": "gEWUxeTKCjc",
+      "title": "Bring Me The Horizon - It Never Ends (HQ)",
+      "channel": "WhoreToAChainsawTAIM",
+      "duration": 276,
+      "channel_is_verified": null
+    },
+    {
+      "id": "vYaxCSpOP3Q",
+      "title": "Bring Me The Horizon - The Sadness Will Never End (Video)",
+      "channel": "Epitaph Records",
+      "duration": 277,
+      "channel_is_verified": true
+    },
+    {
+      "id": "AN2ISxmb9sU",
+      "title": "Bring Me The Horizon – It Never Ends (Live at the Royal Albert Hall)",
+      "channel": "Felice",
+      "duration": 361,
+      "channel_is_verified": null
+    }
+  ]
+}

@@ -12,6 +12,11 @@ func matchingTests() {
         ("never-gonna", "dQw4w9WgXcQ"),
         ("audio", "tjA7nAHOAww"),
         ("live-forever", "TDe1DqxwJoc"),
+        ("it-never-ends", "E_Vez_aKIyI"),
+        ("vybirat-chudo", "RjObnc58fAM"),
+        ("espresso-cover", "afGqwfRPU58"),
+        ("stay-at-your-house", "_AAdae7diOU"),
+        ("bag-of-grins", nil),
     ]
     for (slug, videoID) in expectedPicks {
         test("pick: \(slug)") {
@@ -79,5 +84,41 @@ func matchingTests() {
                                  duration: 194, isVerified: true)
         expectEqual(ClipMatching.score(upload, for: track), 3)
         expectEqual(ClipMatching.score(stranger, for: track), nil)
+    }
+
+    test("a remastered or 4K upload beats the original on the same channel") {
+        let track = TrackQuery(id: "t", artist: "Rick Astley", name: "Never Gonna Give You Up", seconds: 213)
+        let original = Candidate(id: "o", title: "Rick Astley - Never Gonna Give You Up (Official Video)",
+                                 channel: "Rick Astley", duration: 213, isVerified: true)
+        let remaster = Candidate(id: "r", title: "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)",
+                                 channel: "Rick Astley", duration: 213, isVerified: true)
+        expectEqual(ClipMatching.pick(for: track, from: [original, remaster])?.id, "r")
+    }
+
+    test("a bare verified upload counts only as YouTube's top result") {
+        let track = TrackQuery(id: "t", artist: "Bring Me The Horizon", name: "It Never Ends", seconds: 274)
+        let label = Candidate(id: "l", title: "Bring Me The Horizon - \"It Never Ends\"",
+                              channel: "Epitaph Records", duration: 281, isVerified: true)
+        let fan = Candidate(id: "f", title: "Bring Me The Horizon - It Never Ends (HQ)",
+                            channel: "Some Fan", duration: 276, isVerified: false)
+        expectEqual(ClipMatching.pick(for: track, from: [label, fan])?.id, "l")
+        expectEqual(ClipMatching.pick(for: track, from: [fan, label])?.id, nil)
+    }
+
+    test("the first of several Spotify artists is the one matched") {
+        let track = TrackQuery(id: "t", artist: "Samuel Kim, Lorien", name: "Stay", seconds: 200)
+        let video = Candidate(id: "v", title: "Samuel Kim - Stay (Official Video)", channel: "Someone",
+                              duration: 200, isVerified: false)
+        expectEqual(ClipMatching.score(video, for: track), 4)
+    }
+
+    test("a cover is fine on the artist's own channel only") {
+        let track = TrackQuery(id: "t", artist: "First to Eleven", name: "Espresso", seconds: 175)
+        let own = Candidate(id: "o", title: "Espresso - Sabrina Carpenter (Cover by First To Eleven)",
+                            channel: "First To Eleven", duration: 210, isVerified: true)
+        let other = Candidate(id: "x", title: "Espresso - Sabrina Carpenter (Cover by First To Eleven)",
+                              channel: "Fan Covers", duration: 210, isVerified: true)
+        expectEqual(ClipMatching.score(own, for: track), 4)
+        expectEqual(ClipMatching.score(other, for: track), nil)
     }
 }
