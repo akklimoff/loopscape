@@ -62,9 +62,13 @@ The resolver row was re-measured with the real `.build/resolve` harness (Task 5,
 Never Gonna Give You Up), replacing the earlier prototype-script estimate: `yt-dlp 2026.08.19`,
 `deno 2.9.7`. Both numbers still clear the Part 2 pass criteria below.
 
-Consequences: HLS is the only variant worth building. H.264 ≤ 1080p is the format — M1 has no
-AV1 hardware decoder and AVFoundation does not play VP9. 1080p HLS runs at ~4.7 Mbit/s, about
-140 MB per clip and per loop, per display.
+Consequences: HLS is the only variant worth building. M1 has no AV1 hardware decoder. 1080p
+H.264 HLS runs at ~4.7 Mbit/s, about 140 MB per clip and per loop, per display.
+
+Revised 2026-09-30 after the owner found 1080p soft on a 3440×1440 display: YouTube also
+serves VP9 over HLS (formats 616/620/625, up to 4K), and `AVPlayer` decodes it on the M1 Max
+with an exact seek. First frame after an exact seek to 30 s: 1080p H.264 1.3–1.6 s, 1440p VP9
+1.8–2.0 s, 4K VP9 2.5–5.0 s. The owner chose 1440p.
 
 Search ranking is the weak spot, not the plumbing: for "Daft Punk Get Lucky official video"
 the first hit is a third-party re-upload and the second is "Official Audio" (a static cover).
@@ -159,15 +163,23 @@ not survive a rebuild, which must be checked before committing to that route.
   or VEVO, for duration close to the track's; minus for audio, lyric, live, cover, karaoke,
   reaction, slowed, 8D. Below a threshold the answer is "none". Weights and the threshold
   are not fixed here: they are tuned until the Part 2 fixtures pass.
-- Format selector: `bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]`. A video
-  with nothing in that range counts as "none", as does one that is private or removed.
+- Format selector: `bv[vcodec^=vp09][height>=480][height<=1440][protocol^=m3u8]`, falling back
+  to `bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]`. A video with nothing in
+  either range counts as "none", as does one that is private or removed.
+- Matching also accepts a label's upload (YouTube's top hit, verified channel, a title of
+  nothing but artist and name), treats "<artist> Music" as the artist's channel, forgives
+  "cover" on the artist's own channel, matches the first of several Spotify artists, and adds
+  a point for remaster/4K/HD markers.
 - The child process runs with the Homebrew prefix on its `PATH`, so `yt-dlp` finds `deno`.
 - Disk cache `clips.json` beside `packs.json`: `Track ID → video id | none`. Skips the search
   and remembers misses. "none" entries expire after 30 days so a later release is picked up.
   The file is plain JSON and doubles as the manual override: editing a track's `video` pins
   a different clip.
 - `resolve` blocks for the length of the `yt-dlp` runs; the glue owns the queue it runs on.
-- RAM cache: resolved URL per video id until the `expire` timestamp embedded in the URL.
+- URL cache `streams.json` beside `clips.json`: resolved URL per video id until the `expire`
+  timestamp embedded in the URL, kept across relaunches and tagged with the format selector
+  (a change of selector drops it). A stream that fails to play drops its URL, so the one
+  retry fetches a new one.
 - Distinct error for "`yt-dlp` not installed", surfaced in the menu as an install hint.
 
 ### Streaming in ScreenWallpaper
