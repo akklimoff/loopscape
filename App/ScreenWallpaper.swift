@@ -30,6 +30,12 @@ final class ScreenWallpaper {
     var onStreamFailure: ((StreamFailure) -> Void)?
     var isStreaming: Bool { stream != nil }
 
+    var streamPosition: TimeInterval? {
+        guard stream != nil else { return nil }
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? seconds : nil
+    }
+
     init(screen: NSScreen) {
         let frame = screen.frame
         view = PlayerView(frame: NSRect(origin: .zero, size: frame.size))

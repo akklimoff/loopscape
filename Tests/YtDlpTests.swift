@@ -94,4 +94,24 @@ func ytDlpTests() {
                     "bv[vcodec^=vp09][height>=480][height<=1440][protocol^=m3u8]"
                     + "/bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]")
     }
+
+    test("terminateRunning stops a yt-dlp run in flight") {
+        let holder = try temporaryDirectory()
+        let tool = holder.appendingPathComponent("yt-dlp")
+        try Data("#!/bin/sh\nexec sleep 10\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        let ytDlp = try YtDlp(directories: [holder.path])
+
+        let started = Date()
+        var thrown: Error?
+        let done = DispatchGroup()
+        DispatchQueue.global().async(group: done) {
+            do { _ = try ytDlp.search("anything") } catch { thrown = error }
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+        YtDlp.terminateRunning()
+        expect(done.wait(timeout: .now() + 3) == .success, "run still going after terminateRunning")
+        expect(thrown != nil, "a terminated run must throw")
+        expect(Date().timeIntervalSince(started) < 4, "run was not cut short")
+    }
 }

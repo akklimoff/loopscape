@@ -67,7 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isPaused: Bool { defaults.bool(forKey: Key.paused) }
 
     /// Spotify's pause holds a clip still the way the menu's Pause holds everything.
-    private var shouldPlay: Bool { !isPaused && clipMode.clipPlayback?.paused != true }
+    private var displaysAsleep = false
+    private var shouldPlay: Bool {
+        !isPaused && !displaysAsleep && clipMode.clipPlayback?.paused != true
+    }
 
     init(options: LaunchOptions) {
         self.options = options
@@ -131,6 +134,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let url = options.playURL {
             startStream(StreamTarget(url: url, position: options.playAt, stillID: LaunchOptions.stillID(for: url)))
         }
+    }
+
+    /// The desktop picture outlives the app: a clip's still would stay behind as the
+    /// wallpaper of a song long over, while the pack's poster is what the screen saver and the
+    /// next launch continue from.
+    func applicationWillTerminate(_ notification: Notification) {
+        YtDlp.terminateRunning()
+        if stream != nil, let slug = currentSlug { syncDesktopPicture(slug) }
     }
 
     /// Wallpaper is per space and setDesktopImageURL reaches only the active one, so a
@@ -356,21 +367,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             realign()
             return
         }
+        let clipAt = wallpapers.first?.streamPosition
         rebuildScreens()
         // A display attached after the last pack switch still shows the default system
         // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
         // the video — repaint the still on every geometry change, not just on switch.
-        restorePlayback()
+        restorePlayback(clipAt: clipAt)
     }
 
     @objc private func screensDidSleep() {
+        displaysAsleep = true
         wallpapers.forEach { $0.pause() }
     }
 
     @objc private func screensDidWake() {
+        displaysAsleep = false
         if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
+            let clipAt = wallpapers.first?.streamPosition
             rebuildScreens()
-            restorePlayback()
+            restorePlayback(clipAt: clipAt)
         } else if stream != nil {
             // The song kept playing while the displays slept; resuming the frozen frame would
             // leave the video behind it by the whole sleep.
@@ -390,12 +405,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startPlayback(_ slug: String) {
         let target = url(for: slug)
         for wallpaper in wallpapers { wallpaper.play(target) }
-        if isPaused { wallpapers.forEach { $0.pause() } }
+        if isPaused || displaysAsleep { wallpapers.forEach { $0.pause() } }
     }
 
-    private func restorePlayback() {
+    /// While the next track resolves, the clip on screen belongs to the previous one and the
+    /// mode machine has no position for it, so the player's own is the one to keep.
+    private func restorePlayback(clipAt playerPosition: TimeInterval? = nil) {
         if let stream {
-            let position = clipMode.clipPlayback?.position ?? stream.position
+            let position = clipMode.clipPlayback?.position ?? playerPosition ?? stream.position
             startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID))
         } else if let slug = currentSlug {
             startPlayback(slug)

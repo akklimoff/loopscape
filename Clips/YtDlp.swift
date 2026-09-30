@@ -40,6 +40,14 @@ struct YtDlp: ClipSource {
         self.now = now
     }
 
+    private static let running = RunningProcesses()
+
+    /// A resolve blocks its queue for seconds and nothing else would stop the child when the
+    /// app quits, so it would finish the run for nobody.
+    static func terminateRunning() {
+        running.terminateAll()
+    }
+
     static func defaultDirectories() -> [String] {
         let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
         return homebrewDirectories + path.split(separator: ":").map(String.init)
@@ -110,6 +118,8 @@ struct YtDlp: ClipSource {
         process.standardOutput = output
         process.standardError = errors
         do { try process.run() } catch { throw ClipError.toolMissing }
+        YtDlp.running.insert(process)
+        defer { YtDlp.running.remove(process) }
 
         // yt-dlp retries on its own and runs YouTube's player JS in a separate runtime, and
         // --socket-timeout bounds neither, so the run needs a deadline of its own.
@@ -159,5 +169,29 @@ struct OnDemandYtDlp: ClipSource {
 
     func stream(videoID: String) throws -> ClipStream {
         try YtDlp(directories: directories()).stream(videoID: videoID)
+    }
+}
+
+private final class RunningProcesses {
+    private let lock = NSLock()
+    private var processes: [ObjectIdentifier: Process] = [:]
+
+    func insert(_ process: Process) {
+        lock.lock()
+        defer { lock.unlock() }
+        processes[ObjectIdentifier(process)] = process
+    }
+
+    func remove(_ process: Process) {
+        lock.lock()
+        defer { lock.unlock() }
+        processes[ObjectIdentifier(process)] = nil
+    }
+
+    func terminateAll() {
+        lock.lock()
+        let all = Array(processes.values)
+        lock.unlock()
+        all.filter(\.isRunning).forEach { $0.terminate() }
     }
 }
