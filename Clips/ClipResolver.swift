@@ -16,12 +16,20 @@ final class ClipResolver {
     private let store: ClipStore
     private let source: ClipSource
     private let now: () -> Date
-    private var streams: [String: ClipStream] = [:]
+    private let streams: StreamCache
 
-    init(store: ClipStore, source: ClipSource, now: @escaping () -> Date = Date.init) {
+    init(store: ClipStore, source: ClipSource,
+         streams: StreamCache = StreamCache(file: nil, variant: ""),
+         now: @escaping () -> Date = Date.init) {
         self.store = store
         self.source = source
+        self.streams = streams
         self.now = now
+    }
+
+    /// A URL that failed to play would fail again, so the next resolve fetches a new one.
+    func forgetStream(of videoID: String) {
+        streams.forget(videoID)
     }
 
     func resolve(_ track: TrackQuery) throws -> ClipResolution {
@@ -55,12 +63,12 @@ final class ClipResolver {
     }
 
     private func liveStream(for videoID: String) throws -> ClipStream {
-        if let cached = streams[videoID],
+        if let cached = streams.lookup(videoID),
            cached.expires.timeIntervalSince(now()) > Self.expiryMargin {
             return cached
         }
         let fresh = try source.stream(videoID: videoID)
-        streams[videoID] = fresh
+        streams.record(fresh, for: videoID)
         return fresh
     }
 }

@@ -20,11 +20,11 @@ struct YtDlp: ClipSource {
     static let minimumHeight = 480
     static let timeout: TimeInterval = 20
 
-    /// VP9 first: YouTube serves it over HLS up to 4K, AVFoundation decodes it there in
-    /// hardware on Apple silicon, while H.264 stops at 1080p. No AV1: no hardware decoder
-    /// before M3. HLS only: the https DASH variants take ~14 s to start and report a doubled
-    /// duration.
-    static let format = "bv[vcodec^=vp09][height>=\(minimumHeight)][height<=2160][protocol^=m3u8]"
+    /// VP9 first: YouTube serves it over HLS above 1080p, AVFoundation decodes it there in
+    /// hardware on Apple silicon, while H.264 stops at 1080p. Capped at 1440p: 4K took 2.5–5 s
+    /// to its first frame against ~1.9 s. No AV1: no hardware decoder before M3. HLS only: the
+    /// https DASH variants take ~14 s to start and report a doubled duration.
+    static let format = "bv[vcodec^=vp09][height>=\(minimumHeight)][height<=1440][protocol^=m3u8]"
         + "/bv[vcodec^=avc1][height>=\(minimumHeight)][height<=1080][protocol^=m3u8]"
 
     /// An app started from Finder or at login gets a bare PATH without the Homebrew prefix.

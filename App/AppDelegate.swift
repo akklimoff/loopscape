@@ -99,7 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watchLibrary()
 
         resolver = ClipResolver(store: ClipStore(file: root.appendingPathComponent("clips.json")),
-                                source: OnDemandYtDlp())
+                                source: OnDemandYtDlp(),
+                                streams: StreamCache(file: root.appendingPathComponent("streams.json"),
+                                                     variant: YtDlp.format))
         apply(clipMode.setEnabled(defaults.bool(forKey: Key.clips)))
 
         nowPlaying.onChange = { [weak self] track in
@@ -448,8 +450,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func streamFailed(_ failure: StreamFailure) {
-        guard stream != nil else { return }
+        guard let failed = stream else { return }
         os_log("stream: %{public}@ — back to the pack", failure.description)
+        if let resolver {
+            clipQueue.async { resolver.forgetStream(of: failed.stillID) }
+        }
         leaveStream()
         apply(clipMode.streamFailed())
     }

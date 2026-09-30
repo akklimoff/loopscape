@@ -89,9 +89,9 @@ func ytDlpTests() {
         }
     }
 
-    test("the format prefers VP9 up to 4K and falls back to H.264 up to 1080p, HLS only") {
+    test("the format prefers VP9 up to 1440p and falls back to H.264 up to 1080p, HLS only") {
         expectEqual(YtDlp.format,
-                    "bv[vcodec^=vp09][height>=480][height<=2160][protocol^=m3u8]"
+                    "bv[vcodec^=vp09][height>=480][height<=1440][protocol^=m3u8]"
                     + "/bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]")
     }
 }
