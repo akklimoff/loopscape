@@ -79,9 +79,43 @@ play. Stretched over a desktop that is worse than no clip, hence a minimum heigh
 deprecated and hides formats. Homebrew's formula depends on `deno`, so the runtime is there
 — but only if the child process gets a `PATH` that includes the Homebrew prefix.
 
-**Not verified:** that Spotify 1.2.99 still posts `com.spotify.client.PlaybackStateChanged`.
-The listener runs caught nothing, which says nothing either way: Spotify sat paused on one
-track throughout, and the notification fires only on a change.
+**Part 0 result (2026-09-30, Spotify 1.3.0.277): pass.** With Spotify driven by AppleScript
+(play, pause, play, next track, set position, pause), every play, pause and track change posted
+`com.spotify.client.PlaybackStateChanged` with `Player State`, `Track ID`, `Name`, `Artist`,
+`Duration` and `Playback Position`, so Part 1 is built on the notification. Details that
+matter for Parts 1 and 4:
+
+- `Duration` is in milliseconds, `Playback Position` in seconds.
+- A seek posts nothing: the new position shows up only with the next event. Part 4 either
+  accepts a clip drifting after a scrub or polls the position while a clip plays.
+- The first `play` after launching Spotify posted two events 3 ms apart: first a stale one for
+  the previous session's track at its end position, then the real track at 0. The menu line
+  just follows the latest event; in Part 4 the generation counter drops the stale resolve.
+
+### Part 3 measurements
+
+Built code at `5906cc0`, one built-in display, yt-dlp 2026.08.19, deno 2.9.7, macOS 26.6.2
+(25G83), Rick Astley — Never Gonna Give You Up (213 s, 1080p avc1 HLS):
+
+| What | Result |
+|---|---|
+| First frame, `--play-at 30` (still written after the exact seek lands) | 1.56–1.87 s; once 2.64 s |
+| First frame, `--play-at 0` (no seek) | 0.79 s |
+| Start position, `--play-at 30` / `205` | lands at 30.000 / 205.000 s |
+| Loop seam | position runs 211.1 → 0 → 6.0 s at rate 1.0, no stall, no fallback |
+| Empty library while streaming | stream keeps playing, no crash |
+| Bytes in, one display, 60 s window ~70 s into playback | 0.268 MB/s ≈ 2.1 Mbit/s (idle 0.002 MB/s) |
+| RSS while streaming | ~110 MB over a 60 s window; hour run: 152 → 249 MB in the first 5 min, then flat; ~57 MB on a pack |
+| CPU | not attributable: AVFoundation decodes out of process; the app itself shows 2–4 % streaming or on a pack |
+| Unreachable URL → pack | 0.24 s, `item failed: Could not connect to the server.` |
+| Expired URL → pack | 0.76 s, `item failed: You do not have permission…` (CDN 403) |
+| Two displays, drift | not measured, one display |
+
+The first-frame figure is when the still is written, which waits for the exact seek; a frame
+first shows ~0.8 s after launch. The exact seek costs ~1 s of the 2.0 s budget — Part 4 picks
+between a bigger budget and a provisional keyframe still. A wallpaper left paused
+(`defaults read com.aklimoff.loopscape paused` = 1) streams one frozen frame by design, so live
+checks need Resume first.
 
 ## Architecture
 
@@ -137,8 +171,10 @@ not survive a rebuild, which must be checked before committing to that route.
 
 ### Streaming in ScreenWallpaper
 
-- `play(stream:at:)` beside the existing `play(_:)`; looping via `AVPlayerLooper` if it
-  holds up with HLS, otherwise seek to zero on `didPlayToEndTime`.
+- `play(stream:at:)` beside `play(_:)`; looping by keeping two items of the same URL queued
+  on the `AVQueuePlayer` (`StreamSession`), because `AVPlayerLooper` drops outputs from its
+  replicas and its HLS behaviour is undocumented; a stall past 20 s or a failed item reports
+  `StreamFailure`.
 - Item failure or a stall past a timeout is reported to the glue, which falls back to the
   pack. An expired URL after a long sleep takes the same path, then one re-resolve.
 - One player per display, as today — so N displays stream N times. Measured in Part 3;
@@ -149,8 +185,9 @@ not survive a rebuild, which must be checked before committing to that route.
   existing invariant: the wallpaper agent caches by URL, so a still's URL is never rewritten.
 
 **Open risk:** a music video changes scenes, the still does not, so the menu bar strip can
-visibly disagree with the picture below it. Judged by eye in Part 3; remedies (average-colour
-still, periodic repaint) are decided then, not now.
+visibly disagree with the picture below it. Deferred by the owner to the UX pass before
+`v2.0` (see "Owner UX pass"); remedies (average-colour still, periodic repaint) are decided
+there.
 
 ### Glue
 
@@ -234,7 +271,45 @@ Manual scenario run, each step with its expected result:
 10. With `yt-dlp` out of reach → the menu shows the install hint, nothing crashes.
 
 README gains the feature section, the `yt-dlp` dependency and the terms-of-service note.
-Only after all ten steps pass: tag `v2.0` and build the DMG.
+Only after all ten steps and the owner UX pass below: tag `v2.0` and build the DMG.
+
+### Owner UX pass (before `v2.0`)
+
+The owner judges these by eye on the finished feature rather than per part. Everything a log
+can prove was checked in Part 3 (see "Part 3 measurements"); what is left needs a person at
+the screen. Debug launch for the Part 3 items, from the repo root:
+
+```bash
+.build/resolve "Rick Astley" "Never Gonna Give You Up" 213   # URL lasts ~6 h
+URL=<the printed stream URL>
+defaults write com.aklimoff.loopscape paused -bool false     # a paused wallpaper shows one frozen frame
+osascript -e 'quit app "Loopscape"'; while pgrep -x Loopscape >/dev/null; do sleep 0.2; done; sleep 2
+open -a "$PWD/.build/check/Loopscape.app" --args --play-url "$URL" --play-at 205
+/usr/bin/log show --predicate 'process == "Loopscape"' --last 3m --style compact | grep 'stream:'
+```
+
+`log` must be `/usr/bin/log` — in zsh a bare `log` is a builtin and prints nothing.
+
+Deferred from Part 3:
+
+- Loop seam by eye (`--play-at 205`, seam ~8 s in): no black flash, freeze or jump.
+- Pause toggle, Space switch and a fullscreen app mid-stream: a paused stream freezes on its
+  frame, never goes black or swaps to a pack.
+- Display sleep and wake: the stream resumes; after sleeping past the URL's `expire`, the pack
+  returns and nothing is black.
+- Wi-Fi off for 30 s mid-stream: the pack returns after ~20 s, log shows `stalled for 20 s`.
+- Two displays, if one is at hand: bandwidth ≈ 2× one display; drift between the pictures.
+- Menu bar strip across hard scene cuts: acceptable, or pick a remedy (see "Open risk").
+
+Observed while running Part 3, to judge and decide:
+
+- Start is a hard cut: the desktop picture shows for 1–2.6 s, then the video replaces it at
+  once. Candidate: fade the video in over the still.
+- The still is cached per URL (debug path) and per video id (Part 4) from the first run's
+  start position, so later starts elsewhere in the video show a different frame until the
+  video appears.
+- Quitting the app mid-stream leaves the clip's still as the desktop picture.
+- First frame measured 2.64 s once, over the 2.0 s budget (1.56–1.87 s on other runs).
 
 ## Out of scope (2.1+ candidates)
 
