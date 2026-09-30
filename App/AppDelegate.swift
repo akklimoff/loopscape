@@ -369,6 +369,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
             rebuildScreens()
             restorePlayback()
+        } else if stream != nil {
+            // The song kept playing while the displays slept; resuming the frozen frame would
+            // leave the video behind it by the whole sleep.
+            realign()
+            restorePlayback()
         } else {
             realign()
             if shouldPlay { wallpapers.forEach { $0.resume() } }
