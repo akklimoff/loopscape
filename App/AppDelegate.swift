@@ -105,8 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reloadLibrary()
         watchLibrary()
 
+        let vp9 = YtDlp.decodesVP9()
+        let clipFormat = YtDlp.format(allowingVP9: vp9)
+        os_log("clip: %{public}@", vp9 ? "VP9 up to 1440p, H.264 fallback" : "H.264 only, no VP9 decoder")
         resolver = ClipResolver(store: ClipStore(file: root.appendingPathComponent("clips.json")),
-                                source: OnDemandYtDlp())
+                                source: OnDemandYtDlp(format: clipFormat))
         apply(clipMode.setEnabled(defaults.bool(forKey: Key.clips)))
 
         nowPlaying.onChange = { [weak self] track in

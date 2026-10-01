@@ -1,4 +1,5 @@
 import Foundation
+import VideoToolbox
 
 enum ClipError: Error, Equatable {
     case toolMissing
@@ -25,19 +26,33 @@ struct YtDlp: ClipSource {
     /// hardware on Apple silicon, while H.264 stops at 1080p. Capped at 1440p: 4K took 2.5–5 s
     /// to its first frame against ~1.9 s. No AV1: no hardware decoder before M3. HLS only: the
     /// https DASH variants take ~14 s to start and report a doubled duration.
-    static let format = "bv[vcodec^=vp09][height>=\(minimumHeight)][height<=1440][protocol^=m3u8]"
-        + "/bv[vcodec^=avc1][height>=\(minimumHeight)][height<=1080][protocol^=m3u8]"
+    static func format(allowingVP9: Bool) -> String {
+        let h264 = "bv[vcodec^=avc1][height>=\(minimumHeight)][height<=1080][protocol^=m3u8]"
+        guard allowingVP9 else { return h264 }
+        return "bv[vcodec^=vp09][height>=\(minimumHeight)][height<=1440][protocol^=m3u8]/" + h264
+    }
+
+    /// VP9 was only measured on an M1 Max; a Mac that cannot decode it would show a black
+    /// wallpaper with no error at all. VideoToolbox answers false until the supplemental
+    /// decoder is registered, so registering comes first.
+    static func decodesVP9() -> Bool {
+        VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+        return VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9)
+    }
 
     /// An app started from Finder or at login gets a bare PATH without the Homebrew prefix.
     static let homebrewDirectories = ["/opt/homebrew/bin", "/usr/local/bin"]
 
     let executable: URL
+    private let format: String
     private let now: () -> Date
 
     init(directories: [String] = YtDlp.defaultDirectories(),
+         format: String = YtDlp.format(allowingVP9: YtDlp.decodesVP9()),
          now: @escaping () -> Date = Date.init) throws {
         guard let found = YtDlp.locate(in: directories) else { throw ClipError.toolMissing }
         executable = found
+        self.format = format
         self.now = now
     }
 
@@ -65,7 +80,7 @@ struct YtDlp: ClipSource {
     }
 
     func stream(videoID: String) throws -> ClipStream {
-        let output = try run(["-f", YtDlp.format, "--print", "url",
+        let output = try run(["-f", format, "--print", "url",
                               "https://www.youtube.com/watch?v=\(videoID)"])
         return try YtDlp.parseStream(output, now: now())
     }
@@ -166,13 +181,14 @@ struct YtDlp: ClipSource {
 /// once at launch.
 struct OnDemandYtDlp: ClipSource {
     var directories: () -> [String] = YtDlp.defaultDirectories
+    var format = YtDlp.format(allowingVP9: false)
 
     func search(_ query: String) throws -> [Candidate] {
-        try YtDlp(directories: directories()).search(query)
+        try YtDlp(directories: directories(), format: format).search(query)
     }
 
     func stream(videoID: String) throws -> ClipStream {
-        try YtDlp(directories: directories()).stream(videoID: videoID)
+        try YtDlp(directories: directories(), format: format).stream(videoID: videoID)
     }
 }
 

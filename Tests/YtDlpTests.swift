@@ -95,6 +95,13 @@ func ytDlpTests() {
         expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Requested format is not available"), .noFormat)
     }
 
+    test("without a VP9 decoder only H.264 is asked for") {
+        let h264 = "bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]"
+        expectEqual(YtDlp.format(allowingVP9: false), h264)
+        expectEqual(YtDlp.format(allowingVP9: true),
+                    "bv[vcodec^=vp09][height>=480][height<=1440][protocol^=m3u8]/" + h264)
+    }
+
     test("terminateRunning stops a yt-dlp run in flight") {
         let holder = try temporaryDirectory()
         let tool = holder.appendingPathComponent("yt-dlp")
