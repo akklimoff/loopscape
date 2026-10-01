@@ -89,10 +89,11 @@ func ytDlpTests() {
         }
     }
 
-    test("the format prefers VP9 up to 1440p and falls back to H.264 up to 1080p, HLS only") {
-        expectEqual(YtDlp.format,
-                    "bv[vcodec^=vp09][height>=480][height<=1440][protocol^=m3u8]"
-                    + "/bv[vcodec^=avc1][height>=480][height<=1080][protocol^=m3u8]")
+    test("only a removed or private video is unplayable; a missing format is a tool failure") {
+        expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Video unavailable"), .unplayable)
+        expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Private video. Sign in"), .unplayable)
+        expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Requested format is not available"),
+                    .toolFailed("ERROR: [youtube] x: Requested format is not available"))
     }
 
     test("terminateRunning stops a yt-dlp run in flight") {

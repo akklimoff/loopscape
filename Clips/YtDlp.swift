@@ -86,6 +86,15 @@ struct YtDlp: ClipSource {
         return ClipStream(url: url, expires: expiry(of: url) ?? now.addingTimeInterval(3600))
     }
 
+    /// Only the video itself being gone is worth remembering as a miss. A missing format is
+    /// as likely a yt-dlp or YouTube change that hits every video at once, and recording it
+    /// would blank every new track for a month.
+    static func failure(from complaint: String) -> ClipError {
+        let gone = ["Video unavailable", "Private video"]
+        if gone.contains(where: complaint.contains) { return .unplayable }
+        return .toolFailed(String(complaint.suffix(300)))
+    }
+
     /// googlevideo URLs carry their own deadline, as "/expire/<unix>/" in HLS manifests and
     /// "expire=<unix>" in direct links.
     static func expiry(of url: URL) -> Date? {
@@ -149,11 +158,7 @@ struct YtDlp: ClipSource {
         lock.unlock()
         if timedOut { throw ClipError.toolFailed("yt-dlp timed out after 20 s") }
 
-        guard process.terminationStatus == 0 else {
-            let gone = ["Requested format is not available", "Video unavailable", "Private video"]
-            if gone.contains(where: complaint.contains) { throw ClipError.unplayable }
-            throw ClipError.toolFailed(String(complaint.suffix(300)))
-        }
+        guard process.terminationStatus == 0 else { throw YtDlp.failure(from: complaint) }
         return data
     }
 }

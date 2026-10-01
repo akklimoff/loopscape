@@ -82,18 +82,32 @@ enum ClipMatching {
         "\(track.artist) \(cleanTrackName(track.name)) official video"
     }
 
-    /// Spotify joins a track's artists with ", "; video titles and channels name the first.
-    static func primaryArtist(_ artist: String) -> String {
-        artist.components(separatedBy: ", ").first ?? artist
+    private struct Assessment {
+        let points: Int
+        let hasQualityMarker: Bool
+        let bareTitle: Bool
     }
 
-    /// nil means the candidate is ruled out, not merely weak.
+    private enum ChannelMatch {
+        case none
+        case own
+        /// "<artist> Music" is as often a label as the artist's own channel.
+        case musicSuffix
+    }
+
+    /// nil means the candidate is ruled out, not merely weak. A quality marker only ranks
+    /// candidates that already qualify: on a stranger's upload "HD" says nothing about whose it is.
     static func score(_ candidate: Candidate, for track: TrackQuery) -> Int? {
-        guard let assessment = assess(candidate, for: track) else { return nil }
-        return assessment.points >= threshold ? assessment.points : nil
+        guard let assessment = assess(candidate, for: track), assessment.points >= threshold else {
+            return nil
+        }
+        return assessment.points + (assessment.hasQualityMarker ? 1 : 0)
     }
 
-    private static func assess(_ candidate: Candidate, for track: TrackQuery) -> (points: Int, bareTitle: Bool)? {
+    /// Spotify joins several artists with ", ", but a name can contain one too ("Tyler, The
+    /// Creator"), so the whole string is what a title must show; the first listed artist
+    /// counts only through a channel of that exact name.
+    private static func assess(_ candidate: Candidate, for track: TrackQuery) -> Assessment? {
         guard let duration = candidate.duration else { return nil }
         if track.seconds > 0 {
             guard (0.5...2.0).contains(duration / Double(track.seconds)) else { return nil }
@@ -102,12 +116,23 @@ enum ClipMatching {
         let title = " \(normalize(candidate.title)) "
         let channel = normalize(candidate.channel ?? "")
         let name = normalize(cleanTrackName(track.name))
-        let artist = normalize(primaryArtist(track.artist))
-        let channelIsArtist = isArtistChannel(channel, artist: artist)
+        let artist = normalize(track.artist)
+        let listed = track.artist.components(separatedBy: ", ").map(normalize).filter { !$0.isEmpty }
+        let matches = ([artist] + listed.prefix(1)).map { channelMatch(channel, artist: $0) }
+        let titleHasArtist = title.contains(" \(artist) ")
 
         guard !channel.hasSuffix(" topic") else { return nil }
         guard title.contains(" \(name) ") else { return nil }
-        guard title.contains(" \(artist) ") || channelIsArtist else { return nil }
+        let channelIsArtist: Bool
+        if matches.contains(.own) {
+            channelIsArtist = true
+        } else if matches.contains(.musicSuffix) {
+            channelIsArtist = titleHasArtist || listed.contains { title.contains(" \($0) ") }
+            guard channelIsArtist else { return nil }
+        } else {
+            channelIsArtist = false
+        }
+        guard titleHasArtist || channelIsArtist else { return nil }
 
         // A track called "Audio" or "Live Forever" must not trip the word list on its own
         // name, while "Audio (Official Audio)" still has to.
@@ -120,15 +145,16 @@ enum ClipMatching {
             : rejectedWords
         guard !rejected.contains(where: { rest.contains(" \($0) ") }) else { return nil }
 
-        var score = 0
+        var points = 0
         let whole = NSRange(title.startIndex..., in: title)
         if officialVideo.firstMatch(in: title, range: whole) != nil
-            || videoMarkers.contains(where: { title.contains(" \($0) ") }) { score += 3 }
-        if channelIsArtist { score += 3 }
-        if candidate.isVerified { score += 1 }
-        if track.seconds > 0, abs(duration - Double(track.seconds)) <= 10 { score += 1 }
-        if qualityMarkers.contains(where: { rest.contains(" \($0) ") }) { score += 1 }
-        return (score, rest.trimmingCharacters(in: .whitespaces).isEmpty)
+            || videoMarkers.contains(where: { title.contains(" \($0) ") }) { points += 3 }
+        if channelIsArtist { points += 3 }
+        if candidate.isVerified { points += 1 }
+        if track.seconds > 0, abs(duration - Double(track.seconds)) <= 10 { points += 1 }
+        return Assessment(points: points,
+                          hasQualityMarker: qualityMarkers.contains { rest.contains(" \($0) ") },
+                          bareTitle: rest.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     /// Ties go to YouTube's own ranking, which is why the first best score wins. With no
@@ -146,10 +172,11 @@ enum ClipMatching {
         return top
     }
 
-    private static func isArtistChannel(_ channel: String, artist: String) -> Bool {
+    private static func channelMatch(_ channel: String, artist: String) -> ChannelMatch {
         let compactChannel = channel.replacingOccurrences(of: " ", with: "")
         let compactArtist = artist.replacingOccurrences(of: " ", with: "")
-        guard !compactArtist.isEmpty else { return false }
-        return ["", "vevo", "official", "music"].contains { compactChannel == compactArtist + $0 }
+        guard !compactArtist.isEmpty else { return .none }
+        if ["", "vevo", "official"].contains(where: { compactChannel == compactArtist + $0 }) { return .own }
+        return compactChannel == compactArtist + "music" ? .musicSuffix : .none
     }
 }

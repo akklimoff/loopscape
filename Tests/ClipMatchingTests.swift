@@ -105,11 +105,38 @@ func matchingTests() {
         expectEqual(ClipMatching.pick(for: track, from: [fan, label])?.id, nil)
     }
 
-    test("the first of several Spotify artists is the one matched") {
+    test("the first of several Spotify artists counts only through its own channel") {
         let track = TrackQuery(id: "t", artist: "Samuel Kim, Lorien", name: "Stay", seconds: 200)
-        let video = Candidate(id: "v", title: "Samuel Kim - Stay (Official Video)", channel: "Someone",
-                              duration: 200, isVerified: false)
-        expectEqual(ClipMatching.score(video, for: track), 4)
+        let own = Candidate(id: "v", title: "Stay (Official Video)", channel: "Samuel Kim",
+                            duration: 200, isVerified: false)
+        let stranger = Candidate(id: "s", title: "Samuel Kim - Stay (Official Video)", channel: "Someone",
+                                 duration: 200, isVerified: false)
+        expectEqual(ClipMatching.score(own, for: track), 7)
+        expectEqual(ClipMatching.score(stranger, for: track), nil)
+    }
+
+    test("an artist with a comma in the name is not cut to its first word") {
+        let track = TrackQuery(id: "t", artist: "Tyler, The Creator", name: "EARFQUAKE", seconds: 190)
+        let own = Candidate(id: "o", title: "Tyler, The Creator - EARFQUAKE (Official Video)",
+                            channel: "Tyler, The Creator", duration: 190, isVerified: true)
+        let other = Candidate(id: "x", title: "Tyler Joseph - EARFQUAKE (Official Video)",
+                              channel: "Someone", duration: 190, isVerified: false)
+        expectEqual(ClipMatching.score(own, for: track), 8)
+        expectEqual(ClipMatching.score(other, for: track), nil)
+    }
+
+    test("a label named like the artist plus Music still needs the artist in the title") {
+        let track = TrackQuery(id: "t", artist: "Ultra", name: "Stay", seconds: 200)
+        let label = Candidate(id: "l", title: "Kygo - Stay (Official Video)", channel: "Ultra Music",
+                              duration: 200, isVerified: true)
+        expectEqual(ClipMatching.score(label, for: track), nil)
+    }
+
+    test("a quality marker breaks ties but never lifts a stranger over the threshold") {
+        let track = TrackQuery(id: "t", artist: "Billie Eilish", name: "bad guy", seconds: 194)
+        let stranger = Candidate(id: "s", title: "Billie Eilish - bad guy (HD)", channel: "Some Fan",
+                                 duration: 194, isVerified: true)
+        expectEqual(ClipMatching.score(stranger, for: track), nil)
     }
 
     test("a cover is fine on the artist's own channel only") {
