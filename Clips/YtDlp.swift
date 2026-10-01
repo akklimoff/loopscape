@@ -3,6 +3,7 @@ import Foundation
 enum ClipError: Error, Equatable {
     case toolMissing
     case unplayable
+    case noFormat
     case toolFailed(String)
 }
 
@@ -86,12 +87,10 @@ struct YtDlp: ClipSource {
         return ClipStream(url: url, expires: expiry(of: url) ?? now.addingTimeInterval(3600))
     }
 
-    /// Only the video itself being gone is worth remembering as a miss. A missing format is
-    /// as likely a yt-dlp or YouTube change that hits every video at once, and recording it
-    /// would blank every new track for a month.
     static func failure(from complaint: String) -> ClipError {
         let gone = ["Video unavailable", "Private video"]
         if gone.contains(where: complaint.contains) { return .unplayable }
+        if complaint.contains("Requested format is not available") { return .noFormat }
         return .toolFailed(String(complaint.suffix(300)))
     }
 

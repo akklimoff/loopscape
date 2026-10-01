@@ -136,7 +136,24 @@ func resolverTests() {
         expectEqual(source.streamRequests, [])
     }
 
-    test("a video without a playable format is remembered as a miss") {
+    test("a video with no stream in range is skipped for hours, not remembered") {
+        let (store, _) = try makeStore()
+        let source = FakeSource()
+        source.candidates = [official]
+        source.streamResult = .failure(.noFormat)
+        var clock = start
+        let resolver = ClipResolver(store: store, source: source, now: { clock })
+
+        expectEqual(try resolver.resolve(track), ClipResolution.none)
+        expectEqual(try resolver.resolve(track), ClipResolution.none)
+        expectEqual(source.streamRequests.count, 1)
+        expectEqual(store.lookup(track.id), .video("dQw4w9WgXcQ"))
+        clock = start + ClipResolver.formatMissLifetime + 1
+        _ = try? resolver.resolve(track)
+        expectEqual(source.streamRequests.count, 2)
+    }
+
+    test("a removed or private video is remembered as a miss") {
         let (store, _) = try makeStore()
         let source = FakeSource()
         source.candidates = [official]

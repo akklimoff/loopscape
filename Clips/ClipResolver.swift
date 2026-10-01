@@ -13,12 +13,18 @@ final class ClipResolver {
     /// deadline is not handed out.
     static let expiryMargin: TimeInterval = 600
 
+    /// A missing format is as likely a yt-dlp or YouTube change that hits every video at once
+    /// as a property of this one, so it is held in memory for hours rather than written down
+    /// as a miss for a month.
+    static let formatMissLifetime: TimeInterval = 6 * 3600
+
     private let store: ClipStore
     private let source: ClipSource
     private let now: () -> Date
     /// Kept in memory only: a googlevideo URL is signed for the client's IP, so one saved
     /// before a network change would fail to play after it.
     private var streams: [String: ClipStream] = [:]
+    private var formatMisses: [String: Date] = [:]
 
     init(store: ClipStore, source: ClipSource, now: @escaping () -> Date = Date.init) {
         self.store = store
@@ -62,10 +68,17 @@ final class ClipResolver {
         } catch ClipError.unplayable {
             if foundBySearch { store.record(.none, for: track.id) }
             return .none
+        } catch ClipError.noFormat {
+            if foundBySearch { store.record(.video(videoID), for: track.id) }
+            formatMisses[videoID] = now()
+            return .none
         }
     }
 
     private func liveStream(for videoID: String) throws -> ClipStream {
+        if let missed = formatMisses[videoID], now().timeIntervalSince(missed) < Self.formatMissLifetime {
+            throw ClipError.noFormat
+        }
         if let cached = streams[videoID],
            cached.expires.timeIntervalSince(now()) > Self.expiryMargin {
             return cached

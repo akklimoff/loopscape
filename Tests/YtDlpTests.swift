@@ -92,8 +92,7 @@ func ytDlpTests() {
     test("only a removed or private video is unplayable; a missing format is a tool failure") {
         expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Video unavailable"), .unplayable)
         expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Private video. Sign in"), .unplayable)
-        expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Requested format is not available"),
-                    .toolFailed("ERROR: [youtube] x: Requested format is not available"))
+        expectEqual(YtDlp.failure(from: "ERROR: [youtube] x: Requested format is not available"), .noFormat)
     }
 
     test("terminateRunning stops a yt-dlp run in flight") {
