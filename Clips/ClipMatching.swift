@@ -105,8 +105,10 @@ enum ClipMatching {
     }
 
     /// Spotify joins several artists with ", ", but a name can contain one too ("Tyler, The
-    /// Creator"), so the whole string is what a title must show; the first listed artist
-    /// counts only through a channel of that exact name.
+    /// Creator"). So a title shows the artist either as the whole string or by naming every
+    /// listed artist, however it joins them ("ft.", "x", "&"); and a channel named after one
+    /// listed artist counts only when verified or when the title credits another of them,
+    /// since a fragment like "Tyler" is anybody's channel name.
     private static func assess(_ candidate: Candidate, for track: TrackQuery) -> Assessment? {
         guard let duration = candidate.duration else { return nil }
         if track.seconds > 0 {
@@ -118,19 +120,25 @@ enum ClipMatching {
         let name = normalize(cleanTrackName(track.name))
         let artist = normalize(track.artist)
         let listed = track.artist.components(separatedBy: ", ").map(normalize).filter { !$0.isEmpty }
-        let matches = ([artist] + listed.prefix(1)).map { channelMatch(channel, artist: $0) }
+        let credited = listed.filter { title.contains(" \($0) ") }
         let titleHasArtist = title.contains(" \(artist) ")
+            || (listed.count > 1 && credited.count == listed.count)
 
         guard !channel.hasSuffix(" topic") else { return nil }
         guard title.contains(" \(name) ") else { return nil }
-        let channelIsArtist: Bool
-        if matches.contains(.own) {
+
+        var channelIsArtist = false
+        switch channelMatch(channel, artist: artist) {
+        case .own:
             channelIsArtist = true
-        } else if matches.contains(.musicSuffix) {
-            channelIsArtist = titleHasArtist || listed.contains { title.contains(" \($0) ") }
-            guard channelIsArtist else { return nil }
-        } else {
-            channelIsArtist = false
+        case .musicSuffix:
+            channelIsArtist = titleHasArtist || !credited.isEmpty
+        case .none:
+            if listed.count > 1, let own = listed.first(where: { channelMatch(channel, artist: $0) != .none }) {
+                let vouched = candidate.isVerified || credited.contains { $0 != own }
+                let needsCredit = channelMatch(channel, artist: own) == .musicSuffix
+                channelIsArtist = vouched && (!needsCredit || !credited.isEmpty)
+            }
         }
         guard titleHasArtist || channelIsArtist else { return nil }
 

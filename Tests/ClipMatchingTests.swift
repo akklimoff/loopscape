@@ -108,10 +108,10 @@ func matchingTests() {
     test("the first of several Spotify artists counts only through its own channel") {
         let track = TrackQuery(id: "t", artist: "Samuel Kim, Lorien", name: "Stay", seconds: 200)
         let own = Candidate(id: "v", title: "Stay (Official Video)", channel: "Samuel Kim",
-                            duration: 200, isVerified: false)
+                            duration: 200, isVerified: true)
         let stranger = Candidate(id: "s", title: "Samuel Kim - Stay (Official Video)", channel: "Someone",
                                  duration: 200, isVerified: false)
-        expectEqual(ClipMatching.score(own, for: track), 7)
+        expectEqual(ClipMatching.score(own, for: track), 8)
         expectEqual(ClipMatching.score(stranger, for: track), nil)
     }
 
@@ -147,5 +147,26 @@ func matchingTests() {
                               channel: "Fan Covers", duration: 210, isVerified: true)
         expectEqual(ClipMatching.score(own, for: track), 4)
         expectEqual(ClipMatching.score(other, for: track), nil)
+    }
+
+    test("a featured artist may be credited any way in the title") {
+        let track = TrackQuery(id: "t", artist: "Calvin Harris, Dua Lipa", name: "One Kiss", seconds: 214)
+        let label = Candidate(id: "l", title: "Calvin Harris ft. Dua Lipa - One Kiss (Official Video)",
+                              channel: "Some Label", duration: 214, isVerified: false)
+        expectEqual(ClipMatching.score(label, for: track), 4)
+    }
+
+    test("a verified channel of any listed artist is the artist's own") {
+        let track = TrackQuery(id: "t", artist: "Calvin Harris, Dua Lipa", name: "One Kiss", seconds: 214)
+        let featured = Candidate(id: "d", title: "Dua Lipa - One Kiss (Official Video)",
+                                 channel: "Dua Lipa", duration: 214, isVerified: true)
+        expectEqual(ClipMatching.score(featured, for: track), 8)
+    }
+
+    test("a channel named after a fragment of a comma name is a stranger") {
+        let track = TrackQuery(id: "t", artist: "Tyler, The Creator", name: "See You Again", seconds: 180)
+        let cover = Candidate(id: "c", title: "See You Again (Cover)", channel: "Tyler",
+                              duration: 180, isVerified: false)
+        expectEqual(ClipMatching.score(cover, for: track), nil)
     }
 }
