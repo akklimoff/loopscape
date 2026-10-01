@@ -194,8 +194,12 @@ not survive a rebuild, which must be checked before committing to that route.
   `StreamFailure`.
 - Item failure or a stall past a timeout is reported to the glue, which falls back to the
   pack. An expired URL after a long sleep takes the same path, then one re-resolve.
-- One player per display, as today — so N displays stream N times. Measured in Part 3;
-  sharing one decode across displays is out of scope unless the numbers demand it.
+- One player and one stream session shared by every display's layer (2026-10-01, after VP9
+  1440p made a per-display decode and download too costly); packs keep a player per display.
+- The format selector asks for VP9 only when VideoToolbox reports a VP9 decoder (after
+  registering the supplemental one); otherwise H.264 only.
+- Three failed resolves in a row back off for 15 min (YouTube's "confirm you're not a bot"
+  rate limit was hit live on 2026-10-01); a network return lifts it.
 - The still for the menu bar strip is a frame grabbed from the stream with
   `AVPlayerItemVideoOutput` (`AVAssetImageGenerator` does not support HLS), written to
   `~/Library/Caches/<bundle id>/stills/<video id>.jpg`. One file per video id keeps the
@@ -344,7 +348,7 @@ Deferred from Part 3:
 - Display sleep and wake: the stream resumes; after sleeping past the URL's `expire`, the pack
   returns and nothing is black.
 - Wi-Fi off for 30 s mid-stream: the pack returns after ~20 s, log shows `stalled for 20 s`.
-- Two displays, if one is at hand: bandwidth ≈ 2× one display; drift between the pictures.
+- Two displays: one shared player now, so bandwidth ≈ one display and no drift between them.
 - Menu bar strip across hard scene cuts: acceptable, or pick a remedy (see "Open risk").
 
 Deferred from Part 1:
