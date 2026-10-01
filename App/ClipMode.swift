@@ -10,6 +10,7 @@ enum ClipEffect: Equatable {
     case resolve(TrackQuery, generation: Int)
     case play(videoID: String, url: URL, position: TimeInterval)
     case seek(position: TimeInterval)
+    case retryLater
     case pause
     case resume
     case leave
@@ -39,6 +40,7 @@ struct ClipMode {
     private var trackSeen = Date.distantPast
     private var clipOnScreen = false
     private var retriedTrackID: String?
+    private var laterRetriedTrackID: String?
     private let now: () -> Date
 
     init(isEnabled: Bool, now: @escaping () -> Date = Date.init) {
@@ -104,7 +106,15 @@ struct ClipMode {
             return takeClipOff()
         case .failed:
             phase = .failed(trackID: trackID)
-            return takeClipOff()
+            var effects = takeClipOff()
+            // The network can report a path before DNS or routing works (a wake), and no
+            // path change follows to retry on; one delayed attempt per track covers that
+            // without looping on an outage or a rate limit.
+            if track.isPlaying, laterRetriedTrackID != trackID {
+                laterRetriedTrackID = trackID
+                effects.append(.retryLater)
+            }
+            return effects
         }
     }
 
@@ -116,9 +126,9 @@ struct ClipMode {
         phase = track.map { .missing(trackID: $0.id) } ?? .idle
     }
 
-    /// Called after the wallpaper has already fallen back to the pack. Offline, the URL is
-    /// most likely still good and a search would fail too, so the clip waits for the network
-    /// and the one retry is kept for a stream that is actually broken.
+    /// Called after the wallpaper has already fallen back to the pack. Offline a search would
+    /// fail too, so the clip waits for the network, and the one retry is kept for a stream
+    /// that is actually broken.
     mutating func streamFailed(offline: Bool = false) -> [ClipEffect] {
         guard case .showing(let trackID) = phase, let track else { return [] }
         clipOnScreen = false
@@ -136,7 +146,7 @@ struct ClipMode {
         return [.resolve(query, generation: generation)]
     }
 
-    mutating func networkReturned() -> [ClipEffect] {
+    mutating func retryFailed() -> [ClipEffect] {
         guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
               track.isPlaying else { return [] }
         return start(track)

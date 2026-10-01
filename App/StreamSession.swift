@@ -114,16 +114,16 @@ final class StreamSession {
         if pendingSeek == nil { player.play() }
     }
 
-    /// While the first item still loads, the pending seek simply takes the new position.
+    /// An item that is not ready yet must not be sought (AVPlayerItem raises), so the
+    /// position waits for itemReady like the start position does.
     func seek(to position: TimeInterval) {
-        guard !finished else { return }
-        if let pending = pendingSeek {
-            pendingSeek = (pending.item, position)
+        guard !finished, let item = player.currentItem else { return }
+        guard item.status == .readyToPlay, pendingSeek == nil else {
+            pendingSeek = (item, position)
             return
         }
-        player.currentItem?.seek(to: CMTime(seconds: position, preferredTimescale: 600),
-                                 toleranceBefore: .zero, toleranceAfter: .zero,
-                                 completionHandler: nil)
+        item.seek(to: CMTime(seconds: position, preferredTimescale: 600),
+                  toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
     }
 
     private func makeItem() -> AVPlayerItem {

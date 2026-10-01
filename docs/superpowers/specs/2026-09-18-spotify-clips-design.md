@@ -180,7 +180,8 @@ not survive a rebuild, which must be checked before committing to that route.
   persisted: the URL is signed for the client's IP, so it is dropped on every network change.
   A stream that fails while online drops its URL, so the one retry fetches a new one; one
   that fails offline waits for the network and keeps the retry. A resolve that failed is
-  retried when the track resumes or the network returns.
+  retried once 15 s later, and again when the track resumes or the network returns. A video
+  with no format in range is held in memory for 6 h, not recorded as a miss.
 - A same-track event whose position is more than 2 s from the extrapolated one seeks the
   clip (scrub, repeat-one); a playing clip starts 1.5 s ahead to cover seek and first frame.
 - Distinct error for "`yt-dlp` not installed", surfaced in the menu as an install hint.

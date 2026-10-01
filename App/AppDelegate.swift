@@ -511,7 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let previous, online, !previous.online || previous.interfaces != interfaces else { return }
         os_log("network: back on %{public}@", interfaces.joined(separator: ", "))
         if let resolver { clipQueue.async { resolver.forgetAllStreams() } }
-        apply(clipMode.networkReturned())
+        apply(clipMode.retryFailed())
     }
 
     private func apply(_ effects: [ClipEffect]) {
@@ -526,6 +526,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
                 if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
+            case .retryLater:
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                    guard let self else { return }
+                    self.apply(self.clipMode.retryFailed())
+                }
             case .seek(let position):
                 os_log("clip: resync to %{public}.1f s", position)
                 if stream != nil { wallpapers.forEach { $0.seek(to: position) } }
@@ -816,7 +821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if stream != nil {
             // The song played on while the wallpaper was paused; resuming the frozen frame
             // would leave the clip behind it by the whole pause.
-            restorePlayback()
+            restorePlayback(clipAt: wallpapers.first?.streamPosition)
         } else {
             if shouldPlay { wallpapers.forEach { $0.resume() } }
             repaintDesktopPicture()

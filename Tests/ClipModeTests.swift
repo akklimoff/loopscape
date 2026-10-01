@@ -161,7 +161,7 @@ func clipModeTests() {
     test("a failed resolve is retried when the same track resumes") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
-        expectEqual(mode.resolved(.failed, generation: 1), [])
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater])
         expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
         expectEqual(mode.trackChanged(track(at: 40)), [.resolve(query(), generation: 2)])
     }
@@ -177,23 +177,23 @@ func clipModeTests() {
     test("a stream lost while offline waits for the network instead of searching") {
         var mode = showing()
         expectEqual(mode.streamFailed(offline: true), [])
-        expectEqual(mode.networkReturned(), [.resolve(query(), generation: 2)])
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
     }
 
     test("a resolve that failed is retried when the network returns") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
         _ = mode.resolved(.failed, generation: 1)
-        expectEqual(mode.networkReturned(), [.resolve(query(), generation: 2)])
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
     }
 
     test("the network returning leaves a clip on screen and a track without a video alone") {
         var shown = showing()
-        expectEqual(shown.networkReturned(), [])
+        expectEqual(shown.retryFailed(), [])
         var missing = ClipMode(isEnabled: true)
         _ = missing.trackChanged(track())
         _ = missing.resolved(.notFound, generation: 1)
-        expectEqual(missing.networkReturned(), [])
+        expectEqual(missing.retryFailed(), [])
     }
 
     test("a paused track waits for its resume, not the network") {
@@ -201,7 +201,7 @@ func clipModeTests() {
         _ = mode.trackChanged(track())
         _ = mode.resolved(.failed, generation: 1)
         _ = mode.trackChanged(track(at: 40, playing: false))
-        expectEqual(mode.networkReturned(), [])
+        expectEqual(mode.retryFailed(), [])
     }
 
     test("a repeat of the same track sends the clip back to the start") {
@@ -223,5 +223,13 @@ func clipModeTests() {
         var mode = showing(at: clock)
         clock.now += 10
         expectEqual(mode.trackChanged(track(at: 41, playing: false)), [.pause])
+    }
+
+    test("a failed resolve of a playing track asks for one retry later, not a loop") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater])
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
+        expectEqual(mode.resolved(.failed, generation: 2), [])
     }
 }
