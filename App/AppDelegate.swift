@@ -12,6 +12,18 @@ private let defaultRoot: URL = {
     return base.appendingPathComponent("Loopscape")
 }()
 
+private extension CurtainStyle {
+    var menuTitle: String {
+        switch self {
+        case .silk: return Lang.t("Silk", "Шёлк")
+        case .loom: return Lang.t("Loom", "Ткацкий станок")
+        case .wind: return Lang.t("Fabric in the wind", "Ткань на ветру")
+        case .satin: return Lang.t("Satin", "Атлас")
+        case .none: return Lang.t("No animation", "Без анимации")
+        }
+    }
+}
+
 private enum Key {
     static let root = "videosRoot"
     static let pinned = "pinnedSlug"
@@ -19,6 +31,7 @@ private enum Key {
     static let loginAsked = "loginItemDecided"
     static let paused = "paused"
     static let clips = "spotifyClips"
+    static let curtain = "clipCurtain"
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
@@ -43,7 +56,9 @@ struct StreamTarget {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var wallpapers: [ScreenWallpaper] = []
+    private var wallpapers: [ScreenWallpaper] = [] {
+        didSet { curtain.attach(wallpapers.map(\.curtain)) }
+    }
     private var packs: [Pack] = []
     private var videoFiles: [String: URL] = [:]
     private var statusItem: NSStatusItem?
@@ -69,6 +84,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clipMode = ClipMode(isEnabled: false)
     private var resolver: ClipResolver?
     private let clipQueue = DispatchQueue(label: "com.aklimoff.loopscape.clips")
+    private lazy var curtain = CurtainDirector(
+        style: CurtainStyle(rawValue: defaults.string(forKey: Key.curtain) ?? "") ?? .silk)
+    /// A curtain hiding a clip that has no picture yet must stay down until it has one.
+    private var awaitingFirstFrame = false
+    /// Bumped when a different clip starts, not when the same one restarts, so a pack swap
+    /// queued behind the curtain can tell that a newer clip has taken the screen.
+    private var streamGeneration = 0
+    /// Tracks without a clip are usually known misses that resolve in milliseconds; waiting
+    /// this long before covering spares them a curtain that would only open on the same pack.
+    private static let curtainDelay: TimeInterval = 0.3
 
     private let defaults = UserDefaults.standard
 
@@ -440,7 +465,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func restorePlayback(clipAt playerPosition: TimeInterval? = nil) {
         if let stream {
             let position = clipMode.clipPosition ?? playerPosition ?? stream.position
-            startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID))
+            startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID),
+                        animated: awaitingFirstFrame)
         } else if let slug = currentSlug {
             startPlayback(slug)
             syncDesktopPicture(slug)
@@ -457,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         markCurrentForSaver(slug)
         refreshMenu()
         if wasStreaming { restartTimer() }
+        settleCurtain()
     }
 
     // MARK: - streaming
@@ -471,12 +498,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func stopStreamPlayback() {
         guard let playback = streamPlayback else { return }
         streamPlayback = nil
+        awaitingFirstFrame = false
         playback.session.stop()
         playback.player.pause()
         playback.player.removeAllItems()
     }
 
-    private func startStream(_ target: StreamTarget) {
+    /// An animated start keeps the pack on screen until the curtain has covered it; the clip
+    /// buffers on the shared player meanwhile, so the cover costs no time.
+    private func startStream(_ target: StreamTarget, animated: Bool = false) {
+        if stream?.url != target.url { streamGeneration += 1 }
         stopStreamPlayback()
         stream = target
         timer?.invalidate()
@@ -490,21 +521,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.streamFailed(failure)
         }
         streamPlayback = (session, player)
-        wallpapers.forEach { $0.show(stream: session, on: player) }
+        let show = { [weak self, weak session] in
+            guard let self, let session, self.streamPlayback?.session === session else { return }
+            self.wallpapers.forEach { $0.show(stream: session, on: player) }
+        }
+        if animated {
+            awaitingFirstFrame = true
+            curtain.whenCovered(show)
+        } else {
+            show()
+        }
         session.start(at: target.position)
         if !shouldPlay { session.pause() }
 
         let still = stillsDirectory.appendingPathComponent("\(target.stillID).jpg")
-        if FileManager.default.fileExists(atPath: still.path) {
-            syncDesktopPicture(still: still)
-            return
-        }
-        StreamStill.grab(from: player, to: still,
-                         isPositioned: { [weak session] in session?.isPositioned ?? false }) { [weak self] written in
-            guard let self, self.stream?.url == target.url else { return }
+        let cached = FileManager.default.fileExists(atPath: still.path)
+        if cached { syncDesktopPicture(still: still) }
+        StreamStill.firstFrame(of: player,
+                               isPositioned: { [weak session] in session?.isPositioned ?? false }) { [weak self, weak session] frame in
+            guard let self, let session, self.streamPlayback?.session === session else { return }
+            let written = !cached && frame.map { StreamStill.write($0, to: still) } == true
             os_log("stream: first frame after %{public}.2f s, still %{public}@",
-                  Date().timeIntervalSince(started), written ? "written" : "not written")
+                   Date().timeIntervalSince(started),
+                   frame == nil ? "none, timed out" : cached ? "cached" : written ? "written" : "not written")
             if written { self.syncDesktopPicture(still: still) }
+            self.awaitingFirstFrame = false
+            self.settleCurtain()
         }
     }
 
@@ -553,9 +595,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch effect {
             case .resolve(let query, let generation):
                 resolveClip(query, generation: generation)
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.curtainDelay) { [weak self] in
+                    guard let self, self.clipMode.isCurrent(generation) else { return }
+                    self.curtain.cover()
+                }
             case .play(let videoID, let url, let position):
                 os_log("clip: %{public}@ from %{public}.1f s", videoID, position)
-                startStream(StreamTarget(url: url, position: position, stillID: videoID))
+                startStream(StreamTarget(url: url, position: position, stillID: videoID), animated: true)
             case .pause:
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
@@ -570,9 +616,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 streamPlayback?.session.seek(to: position)
             case .leave:
                 os_log("clip: back to the pack")
-                leaveStream()
+                let generation = streamGeneration
+                curtain.whenCovered { [weak self] in
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.leaveStream()
+                    self.settleCurtain()
+                }
             }
         }
+        settleCurtain()
+    }
+
+    private func settleCurtain() {
+        guard !clipMode.isResolving, !awaitingFirstFrame else { return }
+        curtain.reveal()
     }
 
     /// A resolve blocks for seconds, so resolves queue up behind each other during fast
@@ -763,12 +820,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clips.target = self
         clips.state = clipMode.isEnabled ? .on : .off
         menu.addItem(clips)
-        guard clipMode.isEnabled, YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
+        guard clipMode.isEnabled else { return }
+        menu.addItem(curtainItem())
+        guard YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
         let hint = NSMenuItem(title: Lang.t("Needs yt-dlp: brew install yt-dlp",
                                             "Нужен yt-dlp: brew install yt-dlp"),
                               action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
+    }
+
+    private func curtainItem() -> NSMenuItem {
+        let item = NSMenuItem(title: Lang.t("Transition to a clip", "Переход к клипу"),
+                              action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for style in CurtainStyle.allCases {
+            if style == .none { submenu.addItem(.separator()) }
+            let entry = NSMenuItem(title: style.menuTitle, action: #selector(chooseCurtain(_:)),
+                                   keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = style.rawValue
+            entry.state = curtain.style == style ? .on : .off
+            entry.isEnabled = style == .none || CurtainView.isAvailable
+            submenu.addItem(entry)
+        }
+        item.submenu = submenu
+        return item
     }
 
     private func appendEmptyState(to menu: NSMenu) {
@@ -864,6 +942,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             repaintDesktopPicture()
         }
         restartTimer()
+        refreshMenu()
+    }
+
+    @objc private func chooseCurtain(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let style = CurtainStyle(rawValue: raw) else { return }
+        defaults.set(raw, forKey: Key.curtain)
+        curtain.style = style
         refreshMenu()
     }
 

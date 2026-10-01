@@ -70,6 +70,11 @@ struct ClipMode {
         clipOnScreen && track?.isPlaying == false
     }
 
+    var isResolving: Bool {
+        if case .resolving = phase { return true }
+        return false
+    }
+
     func isCurrent(_ generation: Int) -> Bool {
         if case .resolving(_, let current) = phase { return current == generation }
         return false

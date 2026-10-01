@@ -31,6 +31,15 @@ func clipModeTests() {
         return mode
     }
 
+    test("the mode is resolving from a track change until the outcome") {
+        var mode = ClipMode(isEnabled: true)
+        expect(!mode.isResolving)
+        _ = mode.trackChanged(track())
+        expect(mode.isResolving)
+        _ = mode.resolved(.notFound, generation: 1)
+        expect(!mode.isResolving)
+    }
+
     test("with clips off a playing track is not searched") {
         var mode = ClipMode(isEnabled: false)
         expectEqual(mode.trackChanged(track()), [])

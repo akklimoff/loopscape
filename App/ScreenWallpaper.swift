@@ -23,6 +23,7 @@ final class ScreenWallpaper {
 
     private let window: NSWindow
     private let view: PlayerView
+    let curtain: CurtainView
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     /// A clip is one session on one player shared by every display, so the network and the
@@ -31,12 +32,22 @@ final class ScreenWallpaper {
 
     init(screen: NSScreen) {
         let frame = screen.frame
-        view = PlayerView(frame: NSRect(origin: .zero, size: frame.size))
+        let bounds = NSRect(origin: .zero, size: frame.size)
+        view = PlayerView(frame: bounds)
+        view.autoresizingMask = [.width, .height]
+        curtain = CurtainView(frame: bounds)
+        // PlayerView hosts its own layer, and AppKit does not manage subviews of a
+        // layer-hosting view, so the curtain sits beside it in a layer-backed container.
+        let container = NSView(frame: bounds)
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        container.addSubview(view)
+        container.addSubview(curtain)
         window = NSWindow(contentRect: frame,
                           styleMask: .borderless,
                           backing: .buffered,
                           defer: false)
-        window.contentView = view
+        window.contentView = container
         // Below the desktop-icon layer, so icons and Stage Manager stay usable.
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
         // .canJoinAllSpaces covers only desktop spaces; without .fullScreenAuxiliary the
@@ -92,6 +103,7 @@ final class ScreenWallpaper {
     func resume() { if let stream { stream.resume() } else { player.play() } }
 
     func tearDown() {
+        curtain.isActive = false
         stream = nil
         view.playerLayer.player = nil
         player.pause()
