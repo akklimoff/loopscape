@@ -99,20 +99,23 @@ func ytDlpTests() {
     test("terminateRunning stops a yt-dlp run in flight") {
         let holder = try temporaryDirectory()
         let tool = holder.appendingPathComponent("yt-dlp")
-        try Data("#!/bin/sh\nexec sleep 10\n".utf8).write(to: tool)
+        let started = holder.appendingPathComponent("started")
+        try Data("#!/bin/sh\ntouch '\(started.path)'\nexec sleep 10\n".utf8).write(to: tool)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
         let ytDlp = try YtDlp(directories: [holder.path])
 
-        let started = Date()
+        let began = Date()
         var thrown: Error?
         let done = DispatchGroup()
         DispatchQueue.global().async(group: done) {
             do { _ = try ytDlp.search("anything") } catch { thrown = error }
         }
-        Thread.sleep(forTimeInterval: 0.5)
+        while !FileManager.default.fileExists(atPath: started.path), Date().timeIntervalSince(began) < 3 {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
         YtDlp.terminateRunning()
         expect(done.wait(timeout: .now() + 3) == .success, "run still going after terminateRunning")
         expect(thrown != nil, "a terminated run must throw")
-        expect(Date().timeIntervalSince(started) < 4, "run was not cut short")
+        expect(Date().timeIntervalSince(began) < 6, "run was not cut short")
     }
 }

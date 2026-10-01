@@ -176,10 +176,13 @@ not survive a rebuild, which must be checked before committing to that route.
   The file is plain JSON and doubles as the manual override: editing a track's `video` pins
   a different clip.
 - `resolve` blocks for the length of the `yt-dlp` runs; the glue owns the queue it runs on.
-- URL cache `streams.json` beside `clips.json`: resolved URL per video id until the `expire`
-  timestamp embedded in the URL, kept across relaunches and tagged with the format selector
-  (a change of selector drops it). A stream that fails to play drops its URL, so the one
-  retry fetches a new one.
+- RAM cache: resolved URL per video id until the `expire` timestamp embedded in the URL. Not
+  persisted: the URL is signed for the client's IP, so it is dropped on every network change.
+  A stream that fails while online drops its URL, so the one retry fetches a new one; one
+  that fails offline waits for the network and keeps the retry. A resolve that failed is
+  retried when the track resumes or the network returns.
+- A same-track event whose position is more than 2 s from the extrapolated one seeks the
+  clip (scrub, repeat-one); a playing clip starts 1.5 s ahead to cover seek and first frame.
 - Distinct error for "`yt-dlp` not installed", surfaced in the menu as an install hint.
 
 ### Streaming in ScreenWallpaper

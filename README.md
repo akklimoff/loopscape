@@ -99,16 +99,17 @@ come back. It is off by default.
 
 It needs `yt-dlp` from Homebrew (`brew install yt-dlp`, which also installs the `deno`
 runtime it uses); the menu says so when it cannot find it. Videos are found on YouTube and
-streamed, never downloaded; the only thing kept on disk is which video belongs to which
-track, in `clips.json` beside the wallpapers folder — edit an entry there to correct a
-wrong match, or delete it to search again.
+streamed, never downloaded. On disk Loopscape keeps which video belongs to which track, in
+`clips.json` beside the wallpapers folder — edit an entry there to correct a wrong match, or
+delete it to search again — and one still frame per clip, for the desktop picture, in
+`~/Library/Caches/com.aklimoff.loopscape/stills/`.
 
 **Terms of service:** fetching video from YouTube through `yt-dlp` is against YouTube's
 terms of service. The feature ships switched off; turning it on is your call.
 
 Limitations: Loopscape learns about a track from Spotify's play/pause/skip events, so one
-started before Loopscape shows up at the next such event; scrubbing within a track is not
-followed.
+started before Loopscape shows up at the next such event, and a scrub within a track is
+caught up at the next pause or play.
 
 ## Lock screen
 
