@@ -161,7 +161,7 @@ func clipModeTests() {
     test("a failed resolve is retried when the same track resumes") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
-        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A")])
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
         expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
         expectEqual(mode.trackChanged(track(at: 40)), [.resolve(query(), generation: 2)])
     }
@@ -228,7 +228,7 @@ func clipModeTests() {
     test("a failed resolve of a playing track asks for one retry later, not a loop") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
-        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A")])
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
         expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
         expectEqual(mode.resolved(.failed, generation: 2), [])
     }
@@ -238,12 +238,12 @@ func clipModeTests() {
         _ = mode.trackChanged(track("spotify:track:A"))
         _ = mode.resolved(.failed, generation: 1)
         _ = mode.trackChanged(track("spotify:track:B"))
-        expectEqual(mode.resolved(.failed, generation: 2), [.retryLater(trackID: "spotify:track:B")])
+        expectEqual(mode.resolved(.failed, generation: 2), [.retryLater(trackID: "spotify:track:B", after: ClipMode.retryDelay)])
         expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
         expectEqual(mode.retryFailed(trackID: "spotify:track:B"), [.resolve(query("spotify:track:B"), generation: 3)])
         _ = mode.resolved(.found(videoID: "b", url: url), generation: 3)
         _ = mode.trackChanged(track("spotify:track:A"))
-        expectEqual(mode.resolved(.failed, generation: 4), [.leave, .retryLater(trackID: "spotify:track:A")])
+        expectEqual(mode.resolved(.failed, generation: 4), [.leave, .retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
     }
 
     test("the previous clip stays paused with Spotify while the next track resolves") {
@@ -271,8 +271,10 @@ func clipModeTests() {
         let clock = Clock()
         var mode = ClipMode(isEnabled: true, now: { clock.now })
         failThree(&mode)
-        expectEqual(mode.trackChanged(track("spotify:track:A")), [])
-        expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
+        expectEqual(mode.trackChanged(track("spotify:track:A")),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff)])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:A"),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff)])
         clock.now += ClipMode.backoff + 1
         expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:B"))), query("spotify:track:B"))
     }
@@ -303,5 +305,33 @@ func clipModeTests() {
         _ = mode.trackChanged(track("spotify:track:Z"))
         _ = mode.resolved(.failed, generation: 3)
         expectEqual(mode.trackChanged(track("spotify:track:A")), [.resolve(query("spotify:track:A"), generation: 4)])
+    }
+
+    test("the network returning lifts the back-off even with nothing to retry right now") {
+        var mode = ClipMode(isEnabled: true)
+        failThree(&mode)
+        _ = mode.trackChanged(track("spotify:track:A", playing: false))
+        expectEqual(mode.retryFailed(), [])
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:B"))), query("spotify:track:B"))
+    }
+
+    test("a missing yt-dlp neither counts toward the back-off nor asks for a delayed retry") {
+        var mode = ClipMode(isEnabled: true)
+        for (index, id) in ["X", "Y", "Z"].enumerated() {
+            _ = mode.trackChanged(track("spotify:track:\(id)"))
+            expectEqual(mode.resolved(.toolMissing, generation: index + 1), [])
+        }
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:A"))), query("spotify:track:A"))
+    }
+
+    test("a track started during the back-off is retried when it ends") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        failThree(&mode)
+        clock.now += 600
+        expectEqual(mode.trackChanged(track("spotify:track:A")),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff - 600)])
+        clock.now += ClipMode.backoff - 600
+        expectEqual(resolvedQuery(mode.retryFailed(trackID: "spotify:track:A")), query("spotify:track:A"))
     }
 }

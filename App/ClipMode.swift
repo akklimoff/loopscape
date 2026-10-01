@@ -4,13 +4,16 @@ enum ResolveOutcome: Equatable {
     case found(videoID: String, url: URL)
     case notFound
     case failed
+    /// Not a failure of YouTube or the network: the menu hint covers it, and the next play
+    /// after `brew install yt-dlp` finds the tool.
+    case toolMissing
 }
 
 enum ClipEffect: Equatable {
     case resolve(TrackQuery, generation: Int)
     case play(videoID: String, url: URL, position: TimeInterval)
     case seek(position: TimeInterval)
-    case retryLater(trackID: String)
+    case retryLater(trackID: String, after: TimeInterval)
     case pause
     case resume
     case leave
@@ -27,6 +30,7 @@ struct ClipMode {
     /// bot") or yt-dlp is broken; asking again on every track only prolongs a rate limit.
     static let failuresBeforeBackoff = 3
     static let backoff: TimeInterval = 15 * 60
+    static let retryDelay: TimeInterval = 15
     private enum Phase: Equatable {
         case idle
         case resolving(trackID: String, generation: Int)
@@ -110,7 +114,7 @@ struct ClipMode {
     mutating func resolved(_ outcome: ResolveOutcome, generation: Int) -> [ClipEffect] {
         guard isCurrent(generation), case .resolving(let trackID, _) = phase,
               let track, track.id == trackID else { return [] }
-        if outcome != .failed {
+        if outcome != .failed && outcome != .toolMissing {
             failuresInRow = 0
             backoffUntil = nil
         }
@@ -121,6 +125,9 @@ struct ClipMode {
             return [.play(videoID: videoID, url: url, position: startPosition(of: track))]
         case .notFound:
             phase = .missing(trackID: trackID)
+            return takeClipOff()
+        case .toolMissing:
+            phase = .failed(trackID: trackID)
             return takeClipOff()
         case .failed:
             phase = .failed(trackID: trackID)
@@ -135,7 +142,7 @@ struct ClipMode {
             // without looping on an outage or a rate limit.
             if track.isPlaying, laterRetriedTrackID != trackID {
                 laterRetriedTrackID = trackID
-                effects.append(.retryLater(trackID: trackID))
+                effects.append(.retryLater(trackID: trackID, after: Self.retryDelay))
             }
             return effects
         }
@@ -171,12 +178,12 @@ struct ClipMode {
 
     /// nil retries whatever track failed; a delayed retry names the track it was armed for.
     mutating func retryFailed(trackID wanted: String? = nil) -> [ClipEffect] {
-        guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
-              wanted == nil || wanted == trackID, track.isPlaying else { return [] }
         if wanted == nil {
             failuresInRow = 0
             backoffUntil = nil
         }
+        guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
+              wanted == nil || wanted == trackID, track.isPlaying else { return [] }
         return start(track)
     }
 
@@ -199,7 +206,7 @@ struct ClipMode {
         }
         if let backoffUntil, now() < backoffUntil {
             phase = .failed(trackID: track.id)
-            return takeClipOff()
+            return takeClipOff() + [.retryLater(trackID: track.id, after: backoffUntil.timeIntervalSince(now()))]
         }
         phase = .resolving(trackID: track.id, generation: generation)
         return [.resolve(query, generation: generation)]

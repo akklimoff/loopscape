@@ -560,8 +560,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
                 if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
-            case .retryLater(let trackID):
-                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            case .retryLater(let trackID, let delay):
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     self.apply(self.clipMode.retryFailed(trackID: trackID))
                 }
@@ -590,6 +590,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .stream(let videoID, let url): outcome = .found(videoID: videoID, url: url)
                 case .none: outcome = .notFound
                 }
+            } catch ClipError.toolMissing {
+                os_log("clip: yt-dlp is not installed")
+                outcome = .toolMissing
             } catch {
                 os_log("clip: resolve failed: %{public}@", String(describing: error))
                 outcome = .failed
