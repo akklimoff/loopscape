@@ -18,7 +18,7 @@ do {
         let resolution = try resolver.resolve(track)
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(started))
         switch resolution {
-        case .stream(let videoID, let url):
+        case .stream(let videoID, let url, _):
             print("\(attempt): \(elapsed) https://youtu.be/\(videoID)")
             lastURL = url
         case .none:

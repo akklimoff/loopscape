@@ -50,6 +50,26 @@ func clipModeTests() {
         expectEqual(mode.trackPosition, nil)
     }
 
+    test("a clip with an offset starts that much further in and is synced against it") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        expectEqual(mode.resolved(.found(videoID: "v", url: url, offset: 2), generation: 1),
+                    [.play(videoID: "v", url: url, position: 32 + ClipMode.startLead)])
+        clock.now += 5
+        expectEqual(mode.trackPosition, 37)
+        expectEqual(mode.clipOffset, 2)
+    }
+
+    test("an offset measured while the clip plays moves it at once") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.offsetMeasured(2, trackID: "spotify:track:A"),
+                    [.seek(position: 42 + ClipMode.startLead)])
+        expectEqual(mode.offsetMeasured(2, trackID: "spotify:track:B"), [])
+    }
+
     test("with clips off a playing track is not searched") {
         var mode = ClipMode(isEnabled: false)
         expectEqual(mode.trackChanged(track()), [])

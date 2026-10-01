@@ -85,6 +85,13 @@ struct YtDlp: ClipSource {
         return try YtDlp.parseStream(output, now: now())
     }
 
+    /// The smallest m4a is plenty for finding onsets and downloads in about a second.
+    func audio(videoID: String) throws -> URL {
+        let output = try run(["-f", "139/wa[ext=m4a]/ba[ext=m4a]", "--print", "url",
+                              "https://www.youtube.com/watch?v=\(videoID)"])
+        return try YtDlp.parseStream(output, now: now()).url
+    }
+
     static func parseSearch(_ data: Data) throws -> [Candidate] {
         struct Listing: Decodable { let entries: [Candidate] }
         do {
@@ -189,6 +196,10 @@ struct OnDemandYtDlp: ClipSource {
 
     func stream(videoID: String) throws -> ClipStream {
         try YtDlp(directories: directories(), format: format).stream(videoID: videoID)
+    }
+
+    func audio(videoID: String) throws -> URL {
+        try YtDlp(directories: directories(), format: format).audio(videoID: videoID)
     }
 }
 

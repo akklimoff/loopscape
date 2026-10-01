@@ -14,6 +14,25 @@ func storeTests() {
         expectEqual(reopened.lookup("c"), nil)
     }
 
+    test("a measured offset is kept with the track's video until a new video is recorded") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let store = ClipStore(file: file)
+        store.record(.video("v"), for: "a")
+        expectEqual(store.offset(for: "a"), nil)
+        store.recordOffset(2.05, for: "a")
+        expectEqual(ClipStore(file: file).offset(for: "a"), 2.05)
+        expectEqual(store.lookup("a"), .video("v"))
+        store.record(.video("w"), for: "a")
+        expectEqual(store.offset(for: "a"), nil)
+    }
+
+    test("an offset is not recorded for a track without a video") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let store = ClipStore(file: file)
+        store.recordOffset(1, for: "a")
+        expectEqual(store.lookup("a"), nil)
+    }
+
     test("a miss lapses after 30 days, a video never does") {
         let file = try temporaryDirectory().appendingPathComponent("clips.json")
         var clock = Date(timeIntervalSince1970: 1_800_000_000)

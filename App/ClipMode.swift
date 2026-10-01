@@ -1,7 +1,7 @@
 import Foundation
 
 enum ResolveOutcome: Equatable {
-    case found(videoID: String, url: URL)
+    case found(videoID: String, url: URL, offset: TimeInterval = 0)
     case notFound
     case failed
     /// Not a failure of YouTube or the network: the menu hint covers it, and the next play
@@ -51,6 +51,8 @@ struct ClipMode {
     private var track: Track?
     private var trackSeen = Date.distantPast
     private var clipOnScreen = false
+    /// How much later a moment of the song comes in the video than in Spotify's recording.
+    private(set) var clipOffset: TimeInterval = 0
     private var retriedTrackID: String?
     private var laterRetriedTrackID: String?
     private var failuresInRow = 0
@@ -70,11 +72,11 @@ struct ClipMode {
 
     var trackID: String? { track?.id }
 
-    /// Where the song is now, for lining a playing clip up with it; nil unless this track's
-    /// clip is on screen and playing.
+    /// Where in the clip the song is now, for lining a playing clip up with it; nil unless
+    /// this track's clip is on screen and playing.
     var trackPosition: TimeInterval? {
         guard case .showing = phase, clipOnScreen, let track, track.isPlaying else { return nil }
-        return position(of: track)
+        return position(of: track) + clipOffset
     }
 
     /// Covers the clip still on screen while the next track resolves too, which has no
@@ -138,9 +140,10 @@ struct ClipMode {
             backoffUntil = nil
         }
         switch outcome {
-        case .found(let videoID, let url):
+        case .found(let videoID, let url, let offset):
             phase = .showing(trackID: trackID)
             clipOnScreen = true
+            clipOffset = offset
             let play = ClipEffect.play(videoID: videoID, url: url, position: startPosition(of: track))
             guard !track.isPlaying else { return [play] }
             return [play, .pauseTimeout(after: Self.pauseLimit - now().timeIntervalSince(trackSeen))]
@@ -167,6 +170,12 @@ struct ClipMode {
             }
             return effects
         }
+    }
+
+    mutating func offsetMeasured(_ offset: TimeInterval, trackID: String) -> [ClipEffect] {
+        guard case .showing(let shown) = phase, shown == trackID, clipOnScreen, let track else { return [] }
+        clipOffset = offset
+        return track.isPlaying ? [.seek(position: startPosition(of: track))] : []
     }
 
     /// Spotify sends nothing while it stays paused, so the timer armed by the pause asks
@@ -256,7 +265,7 @@ struct ClipMode {
     }
 
     private func startPosition(of track: Track) -> TimeInterval {
-        position(of: track) + (track.isPlaying ? Self.startLead : 0)
+        position(of: track) + clipOffset + (track.isPlaying ? Self.startLead : 0)
     }
 
     /// Spotify reports the position only when something changes, so a playing track's

@@ -29,12 +29,30 @@ final class ClipStore {
         return now().timeIntervalSince(checked) < Self.missLifetime ? Entry.none : nil
     }
 
+    /// A new record drops the old one's offset: it was measured against the old video.
     func record(_ entry: Entry, for trackID: String) {
         var records = load()
         var record: [String: Any] = ["checked": ISO8601DateFormatter().string(from: now())]
         if case .video(let id) = entry { record["video"] = id }
         records[trackID] = record
-        // A lost write costs one repeated search, so failures are not surfaced.
+        save(records)
+    }
+
+    func offset(for trackID: String) -> TimeInterval? {
+        guard let record = load()[trackID] as? [String: Any], record["video"] is String else { return nil }
+        return (record["offset"] as? NSNumber)?.doubleValue
+    }
+
+    func recordOffset(_ offset: TimeInterval, for trackID: String) {
+        var records = load()
+        guard var record = records[trackID] as? [String: Any], record["video"] is String else { return }
+        record["offset"] = (offset * 100).rounded() / 100
+        records[trackID] = record
+        save(records)
+    }
+
+    private func save(_ records: [String: Any]) {
+        // A lost write costs one repeated search or measurement, so failures are not surfaced.
         guard let data = try? JSONSerialization.data(withJSONObject: records,
                                                      options: [.prettyPrinted, .sortedKeys]) else { return }
         try? data.write(to: file, options: .atomic)
