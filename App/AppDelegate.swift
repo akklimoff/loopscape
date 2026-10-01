@@ -55,7 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var root = defaultRoot
     private var unposterable: Set<String> = []
     private var activity: NSObjectProtocol?
-    private var stream: StreamTarget?
+    private var stream: StreamTarget? {
+        didSet { if stream == nil { stopStreamPlayback() } }
+    }
+    private var streamPlayback: (session: StreamSession, player: AVQueuePlayer)?
+    private var streamPosition: TimeInterval? {
+        guard let seconds = streamPlayback?.player.currentTime().seconds, seconds.isFinite else { return nil }
+        return seconds
+    }
     private var desktopStill: URL?
     private let options: LaunchOptions
     private let nowPlaying = NowPlaying()
@@ -387,7 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             realign()
             return
         }
-        let clipAt = wallpapers.first?.streamPosition
+        let clipAt = streamPosition
         rebuildScreens()
         // A display attached after the last pack switch still shows the default system
         // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
@@ -403,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func screensDidWake() {
         displaysAsleep = false
         if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
-            let clipAt = wallpapers.first?.streamPosition
+            let clipAt = streamPosition
             rebuildScreens()
             restorePlayback(clipAt: clipAt)
         } else if stream != nil {
@@ -461,24 +468,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return caches.appendingPathComponent(bundleID).appendingPathComponent("stills")
     }
 
+    private func stopStreamPlayback() {
+        guard let playback = streamPlayback else { return }
+        streamPlayback = nil
+        playback.session.stop()
+        playback.player.pause()
+        playback.player.removeAllItems()
+    }
+
     private func startStream(_ target: StreamTarget) {
+        stopStreamPlayback()
         stream = target
         timer?.invalidate()
         timer = nil
         if wallpapers.isEmpty { rebuildScreens() }
         let started = Date()
-        for wallpaper in wallpapers {
-            wallpaper.onStreamFailure = { [weak self] failure in self?.streamFailed(failure) }
-            wallpaper.play(stream: target.url, at: target.position)
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        player.actionAtItemEnd = .advance
+        let session = StreamSession(url: target.url, player: player) { [weak self] failure in
+            self?.streamFailed(failure)
         }
-        if !shouldPlay { wallpapers.forEach { $0.pause() } }
+        streamPlayback = (session, player)
+        wallpapers.forEach { $0.show(stream: session, on: player) }
+        session.start(at: target.position)
+        if !shouldPlay { session.pause() }
 
         let still = stillsDirectory.appendingPathComponent("\(target.stillID).jpg")
         if FileManager.default.fileExists(atPath: still.path) {
             syncDesktopPicture(still: still)
             return
         }
-        wallpapers.first?.grabStill(to: still) { [weak self] written in
+        StreamStill.grab(from: player, to: still,
+                         isPositioned: { [weak session] in session?.isPositioned ?? false }) { [weak self] written in
             guard let self, self.stream?.url == target.url else { return }
             os_log("stream: first frame after %{public}.2f s, still %{public}@",
                   Date().timeIntervalSince(started), written ? "written" : "not written")
@@ -545,7 +567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             case .seek(let position):
                 os_log("clip: resync to %{public}.1f s", position)
-                if stream != nil { wallpapers.forEach { $0.seek(to: position) } }
+                streamPlayback?.session.seek(to: position)
             case .leave:
                 os_log("clip: back to the pack")
                 leaveStream()
@@ -833,7 +855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if stream != nil {
             // The song played on while the wallpaper was paused; resuming the frozen frame
             // would leave the clip behind it by the whole pause.
-            restorePlayback(clipAt: wallpapers.first?.streamPosition)
+            restorePlayback(clipAt: streamPosition)
         } else {
             if shouldPlay { wallpapers.forEach { $0.resume() } }
             repaintDesktopPicture()

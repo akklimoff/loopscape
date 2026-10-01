@@ -25,14 +25,9 @@ final class ScreenWallpaper {
     private let view: PlayerView
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    /// A clip is one session on one player shared by every display, so the network and the
+    /// decoder do the work once; packs are local files and keep a player per display.
     private var stream: StreamSession?
-
-    var onStreamFailure: ((StreamFailure) -> Void)?
-    var streamPosition: TimeInterval? {
-        guard stream != nil else { return nil }
-        let seconds = player.currentTime().seconds
-        return seconds.isFinite ? seconds : nil
-    }
 
     init(screen: NSScreen) {
         let frame = screen.frame
@@ -63,39 +58,24 @@ final class ScreenWallpaper {
     }
 
     func play(_ url: URL) {
-        stream?.stop()
         stream = nil
+        view.playerLayer.player = player
         looper = nil
         player.removeAllItems()
         player.actionAtItemEnd = .none
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         player.play()
-        onStreamFailure = nil
     }
 
-    func play(stream url: URL, at position: TimeInterval) {
-        stream?.stop()
-        stream = nil
+    func show(stream session: StreamSession, on shared: AVPlayer) {
         looper = nil
         player.removeAllItems()
-        player.actionAtItemEnd = .advance
-        let session = StreamSession(url: url, player: player) { [weak self] failure in
-            self?.stream = nil
-            self?.onStreamFailure?(failure)
-        }
+        player.pause()
         stream = session
-        session.start(at: position)
-    }
-
-    func grabStill(to file: URL, completion: @escaping (Bool) -> Void) {
-        StreamStill.grab(from: player, to: file,
-                         isPositioned: { [weak self] in self?.stream?.isPositioned ?? false },
-                         completion: completion)
+        view.playerLayer.player = shared
     }
 
     func pause() { if let stream { stream.pause() } else { player.pause() } }
-
-    func seek(to position: TimeInterval) { stream?.seek(to: position) }
 
     /// A desktop-level window is not always carried into a fullscreen space created after
     /// it was ordered in; re-ordering on every space change makes it show up there too.
@@ -112,8 +92,8 @@ final class ScreenWallpaper {
     func resume() { if let stream { stream.resume() } else { player.play() } }
 
     func tearDown() {
-        stream?.stop()
         stream = nil
+        view.playerLayer.player = nil
         player.pause()
         looper = nil
         window.orderOut(nil)
