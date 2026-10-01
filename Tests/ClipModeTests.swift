@@ -241,8 +241,9 @@ func clipModeTests() {
         expectEqual(mode.resolved(.failed, generation: 2), [.retryLater(trackID: "spotify:track:B")])
         expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
         expectEqual(mode.retryFailed(trackID: "spotify:track:B"), [.resolve(query("spotify:track:B"), generation: 3)])
+        _ = mode.resolved(.found(videoID: "b", url: url), generation: 3)
         _ = mode.trackChanged(track("spotify:track:A"))
-        expectEqual(mode.resolved(.failed, generation: 4), [.retryLater(trackID: "spotify:track:A")])
+        expectEqual(mode.resolved(.failed, generation: 4), [.leave, .retryLater(trackID: "spotify:track:A")])
     }
 
     test("the previous clip stays paused with Spotify while the next track resolves") {
@@ -252,5 +253,55 @@ func clipModeTests() {
         expect(mode.isClipPaused, "a paused Spotify must hold the clip still on screen")
         _ = mode.trackChanged(track("spotify:track:B"))
         expect(!mode.isClipPaused, "playing again releases it")
+    }
+
+    func resolvedQuery(_ effects: [ClipEffect]) -> TrackQuery? {
+        guard effects.count == 1, case .resolve(let query, _) = effects[0] else { return nil }
+        return query
+    }
+
+    func failThree(_ mode: inout ClipMode) {
+        for (index, id) in ["X", "Y", "Z"].enumerated() {
+            _ = mode.trackChanged(track("spotify:track:\(id)"))
+            _ = mode.resolved(.failed, generation: index + 1)
+        }
+    }
+
+    test("three failed resolves in a row back off for a quarter of an hour") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        failThree(&mode)
+        expectEqual(mode.trackChanged(track("spotify:track:A")), [])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
+        clock.now += ClipMode.backoff + 1
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:B"))), query("spotify:track:B"))
+    }
+
+    test("the third failure asks for no delayed retry") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:X"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:Y"))
+        _ = mode.resolved(.failed, generation: 2)
+        _ = mode.trackChanged(track("spotify:track:Z"))
+        expectEqual(mode.resolved(.failed, generation: 3), [])
+    }
+
+    test("the network returning lifts the back-off") {
+        var mode = ClipMode(isEnabled: true)
+        failThree(&mode)
+        _ = mode.trackChanged(track("spotify:track:A"))
+        expectEqual(resolvedQuery(mode.retryFailed()), query("spotify:track:A"))
+    }
+
+    test("an answer from YouTube resets the failure count") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:X"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:Y"))
+        _ = mode.resolved(.notFound, generation: 2)
+        _ = mode.trackChanged(track("spotify:track:Z"))
+        _ = mode.resolved(.failed, generation: 3)
+        expectEqual(mode.trackChanged(track("spotify:track:A")), [.resolve(query("spotify:track:A"), generation: 4)])
     }
 }

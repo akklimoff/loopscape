@@ -23,6 +23,10 @@ struct ClipMode {
     /// Extrapolation drifts by a few hundred milliseconds; beyond this the song was scrubbed
     /// or restarted, and a seek is worth its frozen second.
     static let driftAllowance: TimeInterval = 2
+    /// Failures in a row usually mean YouTube is refusing yt-dlp ("confirm you're not a
+    /// bot") or yt-dlp is broken; asking again on every track only prolongs a rate limit.
+    static let failuresBeforeBackoff = 3
+    static let backoff: TimeInterval = 15 * 60
     private enum Phase: Equatable {
         case idle
         case resolving(trackID: String, generation: Int)
@@ -41,6 +45,8 @@ struct ClipMode {
     private var clipOnScreen = false
     private var retriedTrackID: String?
     private var laterRetriedTrackID: String?
+    private var failuresInRow = 0
+    private var backoffUntil: Date?
     private let now: () -> Date
 
     init(isEnabled: Bool, now: @escaping () -> Date = Date.init) {
@@ -104,6 +110,10 @@ struct ClipMode {
     mutating func resolved(_ outcome: ResolveOutcome, generation: Int) -> [ClipEffect] {
         guard isCurrent(generation), case .resolving(let trackID, _) = phase,
               let track, track.id == trackID else { return [] }
+        if outcome != .failed {
+            failuresInRow = 0
+            backoffUntil = nil
+        }
         switch outcome {
         case .found(let videoID, let url):
             phase = .showing(trackID: trackID)
@@ -115,6 +125,11 @@ struct ClipMode {
         case .failed:
             phase = .failed(trackID: trackID)
             var effects = takeClipOff()
+            failuresInRow += 1
+            if failuresInRow >= Self.failuresBeforeBackoff {
+                backoffUntil = now().addingTimeInterval(Self.backoff)
+                return effects
+            }
             // The network can report a path before DNS or routing works (a wake), and no
             // path change follows to retry on; one delayed attempt per track covers that
             // without looping on an outage or a rate limit.
@@ -158,6 +173,10 @@ struct ClipMode {
     mutating func retryFailed(trackID wanted: String? = nil) -> [ClipEffect] {
         guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
               wanted == nil || wanted == trackID, track.isPlaying else { return [] }
+        if wanted == nil {
+            failuresInRow = 0
+            backoffUntil = nil
+        }
         return start(track)
     }
 
@@ -176,6 +195,10 @@ struct ClipMode {
         retriedTrackID = nil
         guard let query = Self.query(for: track) else {
             phase = .missing(trackID: track.id)
+            return takeClipOff()
+        }
+        if let backoffUntil, now() < backoffUntil {
+            phase = .failed(trackID: track.id)
             return takeClipOff()
         }
         phase = .resolving(trackID: track.id, generation: generation)
