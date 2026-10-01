@@ -70,6 +70,35 @@ func clipModeTests() {
         expectEqual(mode.offsetMeasured(2, trackID: "spotify:track:B"), [])
     }
 
+    test("a position read from Spotify replaces the extrapolation, a seek included") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        mode.positionRead(5, trackID: "spotify:track:A", at: clock.now)
+        clock.now += 2
+        expectEqual(mode.trackPosition, 7)
+        expectEqual(mode.offsetMeasured(1.5, trackID: "spotify:track:A"),
+                    [.seek(position: 8.5 + ClipMode.startLead)])
+        expectEqual(mode.trackPosition, 8.5)
+    }
+
+    test("a reading older than the last Spotify event is ignored") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let readAt = clock.now
+        clock.now += 1
+        _ = mode.trackChanged(track(at: 60))
+        mode.positionRead(5, trackID: "spotify:track:A", at: readAt)
+        expectEqual(mode.trackPosition, 60)
+    }
+
+    test("a position read for another track is ignored") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        mode.positionRead(100, trackID: "spotify:track:B", at: clock.now)
+        expectEqual(mode.trackPosition, 30)
+    }
+
     test("with clips off a playing track is not searched") {
         var mode = ClipMode(isEnabled: false)
         expectEqual(mode.trackChanged(track()), [])

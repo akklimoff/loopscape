@@ -172,6 +172,15 @@ struct ClipMode {
         }
     }
 
+    /// Spotify posts nothing for a seek, so its own reading is the only way the extrapolation
+    /// learns that the song moved.
+    mutating func positionRead(_ position: TimeInterval, trackID: String, at date: Date) {
+        guard let track, track.id == trackID, track.isPlaying, date >= trackSeen else { return }
+        self.track = Track(id: track.id, name: track.name, artist: track.artist, duration: track.duration,
+                           position: position, isPlaying: true)
+        trackSeen = date
+    }
+
     mutating func offsetMeasured(_ offset: TimeInterval, trackID: String) -> [ClipEffect] {
         guard case .showing(let shown) = phase, shown == trackID, clipOnScreen, let track else { return [] }
         clipOffset = offset

@@ -656,7 +656,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         group.notify(queue: alignQueue) { [weak self] in
             let outcome = Self.placement(parts.soundtrack, parts.recording, parts.before, parts.after, trackID: trackID)
-            DispatchQueue.main.async { self?.finishAlign(outcome, videoID: videoID, trackID: trackID) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let after = parts.after {
+                    self.clipMode.positionRead(after.position, trackID: after.trackID, at: after.at)
+                }
+                self.finishAlign(outcome, videoID: videoID, trackID: trackID)
+            }
         }
     }
 
@@ -735,8 +741,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self, self.streamPlayback?.session === playback.session else { return }
                 switch reading {
                 case .success(let reading) where reading.trackID == trackID:
-                    let now = reading.position + Date().timeIntervalSince(reading.at)
-                    self.lineUp(playback.session, trackTime: now, source: "Spotify")
+                    self.clipMode.positionRead(reading.position, trackID: reading.trackID, at: reading.at)
+                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "Spotify")
                 case .failure(.denied):
                     os_log("sync: Spotify declined Automation access — using the estimated position")
                     self.spotifyReadable = false
