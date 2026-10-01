@@ -161,20 +161,17 @@ func resolverTests() {
         expectEqual(store.lookup(track.id), nil)
     }
 
-    test("a stream URL outlives a relaunch") {
+    test("after a network change every stream is fetched afresh") {
         let (store, _) = try makeStore()
-        let cacheFile = try temporaryDirectory().appendingPathComponent("streams.json")
         let source = FakeSource()
         source.candidates = [official]
         source.streamResult = .success(ClipStream(url: url, expires: start + 3600))
+        let resolver = ClipResolver(store: store, source: source, now: { start })
 
-        let first = ClipResolver(store: store, source: source,
-                                 streams: StreamCache(file: cacheFile, variant: "f"), now: { start })
-        _ = try first.resolve(track)
-        let second = ClipResolver(store: store, source: source,
-                                  streams: StreamCache(file: cacheFile, variant: "f"), now: { start })
-        expectEqual(try second.resolve(track), .stream(videoID: "dQw4w9WgXcQ", url: url))
-        expectEqual(source.streamRequests, ["dQw4w9WgXcQ"])
+        _ = try resolver.resolve(track)
+        resolver.forgetAllStreams()
+        _ = try resolver.resolve(track)
+        expectEqual(source.streamRequests, ["dQw4w9WgXcQ", "dQw4w9WgXcQ"])
     }
 
     test("a forgotten stream is fetched afresh") {

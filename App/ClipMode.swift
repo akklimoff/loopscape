@@ -106,10 +106,16 @@ struct ClipMode {
         phase = track.map { .missing(trackID: $0.id) } ?? .idle
     }
 
-    /// Called after the wallpaper has already fallen back to the pack.
-    mutating func streamFailed() -> [ClipEffect] {
+    /// Called after the wallpaper has already fallen back to the pack. Offline, the URL is
+    /// most likely still good and a search would fail too, so the clip waits for the network
+    /// and the one retry is kept for a stream that is actually broken.
+    mutating func streamFailed(offline: Bool = false) -> [ClipEffect] {
         guard case .showing(let trackID) = phase, let track else { return [] }
         clipOnScreen = false
+        if offline {
+            phase = .failed(trackID: trackID)
+            return []
+        }
         guard retriedTrackID != trackID, let query = Self.query(for: track) else {
             phase = .missing(trackID: trackID)
             return []
@@ -118,6 +124,12 @@ struct ClipMode {
         generation += 1
         phase = .resolving(trackID: trackID, generation: generation)
         return [.resolve(query, generation: generation)]
+    }
+
+    mutating func networkReturned() -> [ClipEffect] {
+        guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
+              track.isPlaying else { return [] }
+        return start(track)
     }
 
     /// Ads, podcast episodes and local files have no music video to find, and the matcher

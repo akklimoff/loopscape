@@ -16,20 +16,23 @@ final class ClipResolver {
     private let store: ClipStore
     private let source: ClipSource
     private let now: () -> Date
-    private let streams: StreamCache
+    /// Kept in memory only: a googlevideo URL is signed for the client's IP, so one saved
+    /// before a network change would fail to play after it.
+    private var streams: [String: ClipStream] = [:]
 
-    init(store: ClipStore, source: ClipSource,
-         streams: StreamCache = StreamCache(file: nil, variant: ""),
-         now: @escaping () -> Date = Date.init) {
+    init(store: ClipStore, source: ClipSource, now: @escaping () -> Date = Date.init) {
         self.store = store
         self.source = source
-        self.streams = streams
         self.now = now
     }
 
     /// A URL that failed to play would fail again, so the next resolve fetches a new one.
     func forgetStream(of videoID: String) {
-        streams.forget(videoID)
+        streams[videoID] = nil
+    }
+
+    func forgetAllStreams() {
+        streams = [:]
     }
 
     func resolve(_ track: TrackQuery) throws -> ClipResolution {
@@ -63,12 +66,12 @@ final class ClipResolver {
     }
 
     private func liveStream(for videoID: String) throws -> ClipStream {
-        if let cached = streams.lookup(videoID),
+        if let cached = streams[videoID],
            cached.expires.timeIntervalSince(now()) > Self.expiryMargin {
             return cached
         }
         let fresh = try source.stream(videoID: videoID)
-        streams.record(fresh, for: videoID)
+        streams[videoID] = fresh
         return fresh
     }
 }

@@ -163,4 +163,34 @@ func clipModeTests() {
         _ = mode.trackChanged(track(at: 40, playing: false))
         expectEqual(mode.trackChanged(track(at: 40)), [])
     }
+
+    test("a stream lost while offline waits for the network instead of searching") {
+        var mode = showing()
+        expectEqual(mode.streamFailed(offline: true), [])
+        expectEqual(mode.networkReturned(), [.resolve(query(), generation: 2)])
+    }
+
+    test("a resolve that failed is retried when the network returns") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.failed, generation: 1)
+        expectEqual(mode.networkReturned(), [.resolve(query(), generation: 2)])
+    }
+
+    test("the network returning leaves a clip on screen and a track without a video alone") {
+        var shown = showing()
+        expectEqual(shown.networkReturned(), [])
+        var missing = ClipMode(isEnabled: true)
+        _ = missing.trackChanged(track())
+        _ = missing.resolved(.notFound, generation: 1)
+        expectEqual(missing.networkReturned(), [])
+    }
+
+    test("a paused track waits for its resume, not the network") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track(at: 40, playing: false))
+        expectEqual(mode.networkReturned(), [])
+    }
 }

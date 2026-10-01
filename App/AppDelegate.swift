@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Network
 import ServiceManagement
 import UniformTypeIdentifiers
 import os
@@ -68,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Spotify's pause holds a clip still the way the menu's Pause holds everything.
     private var displaysAsleep = false
+    private let pathMonitor = NWPathMonitor()
+    private var network: (online: Bool, interfaces: [String])?
     private var shouldPlay: Bool {
         !isPaused && !displaysAsleep && clipMode.clipPlayback?.paused != true
     }
@@ -102,9 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watchLibrary()
 
         resolver = ClipResolver(store: ClipStore(file: root.appendingPathComponent("clips.json")),
-                                source: OnDemandYtDlp(),
-                                streams: StreamCache(file: root.appendingPathComponent("streams.json"),
-                                                     variant: YtDlp.format))
+                                source: OnDemandYtDlp())
         apply(clipMode.setEnabled(defaults.bool(forKey: Key.clips)))
 
         nowPlaying.onChange = { [weak self] track in
@@ -116,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.refreshMenu()
         }
         nowPlaying.start()
+
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            let interfaces = path.availableInterfaces.map(\.name)
+            DispatchQueue.main.async { self?.networkChanged(online: online, interfaces: interfaces) }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
 
         NotificationCenter.default.addObserver(
             self,
@@ -468,12 +476,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func streamFailed(_ failure: StreamFailure) {
         guard let failed = stream else { return }
-        os_log("stream: %{public}@ — back to the pack", failure.description)
-        if let resolver {
+        let offline = network?.online == false
+        os_log("stream: %{public}@%{public}@ — back to the pack", failure.description,
+               offline ? " while offline" : "")
+        if !offline, let resolver {
             clipQueue.async { resolver.forgetStream(of: failed.stillID) }
         }
         leaveStream()
-        apply(clipMode.streamFailed())
+        apply(clipMode.streamFailed(offline: offline))
     }
 
     private func leaveStream() {
@@ -492,6 +502,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Spotify clips
+
+    /// Stream URLs are signed for the client's IP, so a new path invalidates all of them;
+    /// a clip or a search that failed while offline gets its retry once a path is back.
+    private func networkChanged(online: Bool, interfaces: [String]) {
+        let previous = network
+        network = (online, interfaces)
+        guard let previous, online, !previous.online || previous.interfaces != interfaces else { return }
+        os_log("network: back on %{public}@", interfaces.joined(separator: ", "))
+        if let resolver { clipQueue.async { resolver.forgetAllStreams() } }
+        apply(clipMode.networkReturned())
+    }
 
     private func apply(_ effects: [ClipEffect]) {
         for effect in effects {
