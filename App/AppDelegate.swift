@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let pathMonitor = NWPathMonitor()
     private var network: (online: Bool, interfaces: [String])?
     private var shouldPlay: Bool {
-        !isPaused && !displaysAsleep && clipMode.clipPlayback?.paused != true
+        !isPaused && !displaysAsleep && !clipMode.isClipPaused
     }
 
     init(options: LaunchOptions) {
@@ -420,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// mode machine has no position for it, so the player's own is the one to keep.
     private func restorePlayback(clipAt playerPosition: TimeInterval? = nil) {
         if let stream {
-            let position = clipMode.clipPlayback?.position ?? playerPosition ?? stream.position
+            let position = clipMode.clipPosition ?? playerPosition ?? stream.position
             startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID))
         } else if let slug = currentSlug {
             startPlayback(slug)

@@ -48,7 +48,7 @@ func clipModeTests() {
         clock.now += 4
         expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
                     [.play(videoID: "5NV6Rdv1a3I", url: url, position: 34 + ClipMode.startLead)])
-        expectEqual(mode.clipPlayback?.paused, false)
+        expect(!mode.isClipPaused, "a playing track plays its clip")
     }
 
     test("a track paused while resolving starts its clip paused where it stopped") {
@@ -60,8 +60,8 @@ func clipModeTests() {
         clock.now += 5
         expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
                     [.play(videoID: "5NV6Rdv1a3I", url: url, position: 32)])
-        expectEqual(mode.clipPlayback?.paused, true)
-        expectEqual(mode.clipPlayback?.position, 32)
+        expect(mode.isClipPaused, "a paused track holds its clip")
+        expectEqual(mode.clipPosition, 32)
     }
 
     test("only the last of several quick skips gets a clip") {
@@ -81,7 +81,7 @@ func clipModeTests() {
         expectEqual(mode.resolved(.notFound, generation: 1), [])
         expectEqual(mode.trackChanged(track(playing: false)), [])
         expectEqual(mode.trackChanged(track(playing: true)), [])
-        expect(mode.clipPlayback == nil, "no clip is on screen")
+        expect(mode.clipPosition == nil, "no clip is on screen")
     }
 
     test("the old clip stays until the next track resolves, then gives way if it has none") {
@@ -123,7 +123,7 @@ func clipModeTests() {
         expectEqual(mode.streamFailed(), [.resolve(query(), generation: 2)])
         expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 2).count, 1)
         expectEqual(mode.streamFailed(), [])
-        expect(mode.clipPlayback == nil, "no clip is on screen after the second failure")
+        expect(mode.clipPosition == nil, "no clip is on screen after the second failure")
     }
 
     test("switching clips off takes the clip down and voids the resolve in flight") {
@@ -137,7 +137,7 @@ func clipModeTests() {
         var mode = showing()
         mode.packChosen()
         expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
-        expect(mode.clipPlayback == nil, "the pack is on screen, not a clip")
+        expect(mode.clipPosition == nil, "the pack is on screen, not a clip")
         expectEqual(mode.trackChanged(track(at: 40, playing: true)), [])
         expectEqual(mode.trackChanged(track("spotify:track:B")),
                     [.resolve(query("spotify:track:B"), generation: 3)])
@@ -243,5 +243,14 @@ func clipModeTests() {
         expectEqual(mode.retryFailed(trackID: "spotify:track:B"), [.resolve(query("spotify:track:B"), generation: 3)])
         _ = mode.trackChanged(track("spotify:track:A"))
         expectEqual(mode.resolved(.failed, generation: 4), [.retryLater(trackID: "spotify:track:A")])
+    }
+
+    test("the previous clip stays paused with Spotify while the next track resolves") {
+        var mode = showing()
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause])
+        expect(mode.isClipPaused, "a paused Spotify must hold the clip still on screen")
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expect(!mode.isClipPaused, "playing again releases it")
     }
 }

@@ -48,9 +48,16 @@ struct ClipMode {
         self.now = now
     }
 
-    var clipPlayback: (position: TimeInterval, paused: Bool)? {
+    /// Where a restarted clip should begin; nil when the clip on screen is not this track's.
+    var clipPosition: TimeInterval? {
         guard case .showing = phase, clipOnScreen, let track else { return nil }
-        return (startPosition(of: track), !track.isPlaying)
+        return startPosition(of: track)
+    }
+
+    /// Covers the clip still on screen while the next track resolves too, which has no
+    /// playback position of its own but must still follow Spotify's pause.
+    var isClipPaused: Bool {
+        clipOnScreen && track?.isPlaying == false
     }
 
     func isCurrent(_ generation: Int) -> Bool {
