@@ -1,7 +1,7 @@
 import Foundation
 
 enum ClipResolution: Equatable {
-    case stream(videoID: String, url: URL, offset: TimeInterval = 0)
+    case stream(videoID: String, url: URL, offsets: OffsetMap = OffsetMap())
     case none
 }
 
@@ -64,7 +64,7 @@ final class ClipResolver {
         do {
             let stream = try liveStream(for: videoID)
             if foundBySearch { store.record(.video(videoID), for: track.id) }
-            return .stream(videoID: videoID, url: stream.url, offset: store.offset(for: track.id) ?? 0)
+            return .stream(videoID: videoID, url: stream.url, offsets: store.offsets(for: track.id) ?? OffsetMap())
         } catch ClipError.unplayable {
             if foundBySearch { store.record(.none, for: track.id) }
             return .none

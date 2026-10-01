@@ -80,16 +80,27 @@ enum AudioAlign {
 
     /// Normalised cross-correlation over every placement, averaged across bands and refined
     /// between frames by fitting a parabola through the peak and its neighbours.
-    static func locate(_ segment: [[Float]], in reference: [[Float]]) -> Match? {
+    /// With `near`, only placements within `within` seconds of it count: a chorus heard again
+    /// is ambiguous over the whole song but not around where the song is known to be.
+    static func locate(_ segment: [[Float]], in reference: [[Float]],
+                       near expected: TimeInterval? = nil, within radius: TimeInterval = 0) -> Match? {
         guard segment.count == reference.count, let length = segment.first?.count,
               let available = reference.first?.count, length > 10, available >= length else { return nil }
-        let placements = available - length + 1
+        var first = 0
+        var last = available - length
+        if let expected {
+            first = max(0, Int((expected - radius) * frameRate))
+            last = min(last, Int((expected + radius) * frameRate))
+            guard first <= last else { return nil }
+        }
+        let window = reference.map { Array($0[first..<(last + length)]) }
+        let placements = last - first + 1
         var scores = [Float](repeating: 0, count: placements)
         var usedBands = 0
         for band in segment.indices {
             guard let normalised = normalise(segment[band]) else { continue }
             usedBands += 1
-            accumulate(normalised, against: reference[band], into: &scores)
+            accumulate(normalised, against: window[band], into: &scores)
         }
         guard usedBands > 0 else { return nil }
         vDSP_vsdiv(scores, 1, [Float(usedBands)], &scores, 1, vDSP_Length(placements))
@@ -106,7 +117,7 @@ enum AudioAlign {
             let curvature = left - 2 * centre + right
             if curvature < 0 { refined += Double(0.5 * (left - right) / curvature) }
         }
-        return Match(time: refined / frameRate, peak: scores[best], margin: scores[best] - rival)
+        return Match(time: (Double(first) + refined) / frameRate, peak: scores[best], margin: scores[best] - rival)
     }
 
     private static func normalise(_ values: [Float]) -> [Float]? {

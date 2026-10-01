@@ -40,6 +40,18 @@ func audioAlignTests() {
         expect(match?.isConfident == true, "\(String(describing: match))")
     }
 
+    test("a repeated section is told apart by where it was expected") {
+        let verse = music(seconds: 30, sampleRate: rate, seed: 7)
+        let song = verse + verse
+        let start = Int(40 * rate)
+        let heard = AudioAlign.onsets(Array(song[start..<start + Int(10 * rate)]), sampleRate: rate)
+        let reference = AudioAlign.onsets(song, sampleRate: rate)
+        expect(AudioAlign.locate(heard, in: reference)?.isConfident != true, "a repeat is ambiguous on its own")
+        let match = AudioAlign.locate(heard, in: reference, near: 41, within: 6)
+        expect(match.map { abs($0.time - 40) < 0.02 } == true, "\(String(describing: match))")
+        expect(match?.isConfident == true, "\(String(describing: match))")
+    }
+
     test("a stretch of a different song is not confidently placed") {
         let song = music(seconds: 60, sampleRate: rate, seed: 7)
         let other = music(seconds: 12, sampleRate: rate, seed: 123)

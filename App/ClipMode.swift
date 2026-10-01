@@ -1,7 +1,7 @@
 import Foundation
 
 enum ResolveOutcome: Equatable {
-    case found(videoID: String, url: URL, offset: TimeInterval = 0)
+    case found(videoID: String, url: URL, offsets: OffsetMap = OffsetMap())
     case notFound
     case failed
     /// Not a failure of YouTube or the network: the menu hint covers it, and the next play
@@ -21,9 +21,12 @@ enum ClipEffect: Equatable {
 }
 
 struct ClipMode {
-    /// An exact seek plus the first frame took 1.4–2.0 s in the live runs, so a playing clip
-    /// is started that far ahead of the song to land level with it.
-    static let startLead: TimeInterval = 1.5
+    /// A starting clip is sought this far ahead of the song and held on that frame until the
+    /// song gets there. An exact seek plus the first frame took 1.0–2.6 s in the live runs;
+    /// running short only costs a nudge, running long a still frame under the curtain.
+    static let startLead: TimeInterval = 2.5
+    /// A seek within a stream that is already playing lands in a few tenths of a second.
+    static let seekLead: TimeInterval = 0.8
     /// Extrapolation drifts by a few hundred milliseconds; beyond this the song was scrubbed
     /// or restarted, and a seek is worth its frozen second.
     static let driftAllowance: TimeInterval = 2
@@ -50,9 +53,12 @@ struct ClipMode {
     private var generation = 0
     private var track: Track?
     private var trackSeen = Date.distantPast
+    /// The last time the song moved other than by playing on: an event, or a seek that only
+    /// a reading revealed. Before it, where the song was cannot be told from where it is.
+    private var lastMoved = Date.distantPast
+    private static let readingJump: TimeInterval = 0.3
     private var clipOnScreen = false
-    /// How much later a moment of the song comes in the video than in Spotify's recording.
-    private(set) var clipOffset: TimeInterval = 0
+    private(set) var offsets = OffsetMap()
     private var retriedTrackID: String?
     private var laterRetriedTrackID: String?
     private var failuresInRow = 0
@@ -76,7 +82,8 @@ struct ClipMode {
     /// this track's clip is on screen and playing.
     var trackPosition: TimeInterval? {
         guard case .showing = phase, clipOnScreen, let track, track.isPlaying else { return nil }
-        return position(of: track) + clipOffset
+        let position = position(of: track)
+        return position + offsets.offset(at: position)
     }
 
     /// Covers the clip still on screen while the next track resolves too, which has no
@@ -108,6 +115,7 @@ struct ClipMode {
         let expected = track.map(position(of:))
         track = new
         trackSeen = now()
+        lastMoved = trackSeen
         guard isEnabled else { return [] }
         guard let new else { return leave() }
         if sameTrack {
@@ -115,7 +123,7 @@ struct ClipMode {
             case .showing:
                 let toggle = new.isPlaying ? [ClipEffect.resume] : [.pause, .pauseTimeout(after: Self.pauseLimit)]
                 guard let expected, abs(new.position - expected) > Self.driftAllowance else { return toggle }
-                return [.seek(position: startPosition(of: new))] + toggle
+                return [.seek(position: startPosition(of: new, lead: Self.seekLead))] + toggle
             case .resolving:
                 guard clipOnScreen else { return [] }
                 return new.isPlaying ? [.resume] : [.pause, .pauseTimeout(after: Self.pauseLimit)]
@@ -140,10 +148,10 @@ struct ClipMode {
             backoffUntil = nil
         }
         switch outcome {
-        case .found(let videoID, let url, let offset):
+        case .found(let videoID, let url, let offsets):
             phase = .showing(trackID: trackID)
             clipOnScreen = true
-            clipOffset = offset
+            self.offsets = offsets
             let play = ClipEffect.play(videoID: videoID, url: url, position: startPosition(of: track))
             guard !track.isPlaying else { return [play] }
             return [play, .pauseTimeout(after: Self.pauseLimit - now().timeIntervalSince(trackSeen))]
@@ -176,15 +184,24 @@ struct ClipMode {
     /// learns that the song moved.
     mutating func positionRead(_ position: TimeInterval, trackID: String, at date: Date) {
         guard let track, track.id == trackID, track.isPlaying, date >= trackSeen else { return }
+        if abs(position - (track.position + date.timeIntervalSince(trackSeen))) > Self.readingJump {
+            lastMoved = date
+        }
         self.track = Track(id: track.id, name: track.name, artist: track.artist, duration: track.duration,
                            position: position, isPlaying: true)
         trackSeen = date
     }
 
-    mutating func offsetMeasured(_ offset: TimeInterval, trackID: String) -> [ClipEffect] {
-        guard case .showing(let shown) = phase, shown == trackID, clipOnScreen, let track else { return [] }
-        clipOffset = offset
-        return track.isPlaying ? [.seek(position: startPosition(of: track))] : []
+    func songPosition(at date: Date) -> TimeInterval? {
+        guard let track, date >= lastMoved else { return nil }
+        return track.isPlaying ? track.position + date.timeIntervalSince(trackSeen) : track.position
+    }
+
+    /// The sync loop sees the clip off its mark at its next check and moves it there.
+    mutating func offsetMeasured(_ offset: TimeInterval, at position: TimeInterval, trackID: String) -> Bool {
+        guard case .showing(let shown) = phase, shown == trackID, clipOnScreen else { return false }
+        offsets.set(offset, at: position)
+        return true
     }
 
     /// Spotify sends nothing while it stays paused, so the timer armed by the pause asks
@@ -273,8 +290,9 @@ struct ClipMode {
         return [.leave]
     }
 
-    private func startPosition(of track: Track) -> TimeInterval {
-        position(of: track) + clipOffset + (track.isPlaying ? Self.startLead : 0)
+    private func startPosition(of track: Track, lead: TimeInterval = startLead) -> TimeInterval {
+        let position = position(of: track)
+        return position + offsets.offset(at: position) + (track.isPlaying ? lead : 0)
     }
 
     /// Spotify reports the position only when something changes, so a playing track's

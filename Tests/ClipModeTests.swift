@@ -54,20 +54,34 @@ func clipModeTests() {
         let clock = Clock()
         var mode = ClipMode(isEnabled: true, now: { clock.now })
         _ = mode.trackChanged(track(at: 30))
-        expectEqual(mode.resolved(.found(videoID: "v", url: url, offset: 2), generation: 1),
+        var offsets = OffsetMap()
+        offsets.set(2, at: 10)
+        expectEqual(mode.resolved(.found(videoID: "v", url: url, offsets: offsets), generation: 1),
                     [.play(videoID: "v", url: url, position: 32 + ClipMode.startLead)])
         clock.now += 5
         expectEqual(mode.trackPosition, 37)
-        expectEqual(mode.clipOffset, 2)
+        expectEqual(mode.offsets, offsets)
     }
 
-    test("an offset measured while the clip plays moves it at once") {
+    test("an offset measured while the clip plays applies from where it was heard") {
         let clock = Clock()
         var mode = showing(at: clock)
         clock.now += 10
-        expectEqual(mode.offsetMeasured(2, trackID: "spotify:track:A"),
-                    [.seek(position: 42 + ClipMode.startLead)])
-        expectEqual(mode.offsetMeasured(2, trackID: "spotify:track:B"), [])
+        expect(mode.offsetMeasured(2, at: 35, trackID: "spotify:track:A"))
+        expectEqual(mode.trackPosition, 42)
+        expect(!mode.offsetMeasured(3, at: 35, trackID: "spotify:track:B"))
+        expectEqual(mode.trackPosition, 42)
+    }
+
+    test("an offset change later in the song takes over once the song gets there") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.offsetMeasured(1, at: 30, trackID: "spotify:track:A")
+        _ = mode.offsetMeasured(4, at: 50, trackID: "spotify:track:A")
+        clock.now += 10
+        expectEqual(mode.trackPosition, 41)
+        clock.now += 15
+        expectEqual(mode.trackPosition, 59)
     }
 
     test("a position read from Spotify replaces the extrapolation, a seek included") {
@@ -77,8 +91,7 @@ func clipModeTests() {
         mode.positionRead(5, trackID: "spotify:track:A", at: clock.now)
         clock.now += 2
         expectEqual(mode.trackPosition, 7)
-        expectEqual(mode.offsetMeasured(1.5, trackID: "spotify:track:A"),
-                    [.seek(position: 8.5 + ClipMode.startLead)])
+        _ = mode.offsetMeasured(1.5, at: 7, trackID: "spotify:track:A")
         expectEqual(mode.trackPosition, 8.5)
     }
 
@@ -97,6 +110,36 @@ func clipModeTests() {
         var mode = showing(at: clock)
         mode.positionRead(100, trackID: "spotify:track:B", at: clock.now)
         expectEqual(mode.trackPosition, 30)
+    }
+
+    test("the song's position at a past moment is known while nothing has moved it since") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now.addingTimeInterval(2)
+        clock.now += 10
+        expectEqual(mode.songPosition(at: heardFrom), 32)
+        mode.positionRead(40.1, trackID: "spotify:track:A", at: clock.now)
+        expectEqual(mode.songPosition(at: heardFrom), 32.1)
+    }
+
+    test("a seek seen in a reading hides where the song was before it") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now.addingTimeInterval(2)
+        clock.now += 10
+        mode.positionRead(90, trackID: "spotify:track:A", at: clock.now)
+        expectEqual(mode.songPosition(at: heardFrom), nil)
+        expectEqual(mode.songPosition(at: clock.now), 90)
+    }
+
+    test("a Spotify event hides where the song was before it") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now
+        clock.now += 5
+        _ = mode.trackChanged(track(at: 35, playing: false))
+        _ = mode.trackChanged(track(at: 35))
+        expectEqual(mode.songPosition(at: heardFrom), nil)
     }
 
     test("with clips off a playing track is not searched") {
@@ -306,7 +349,7 @@ func clipModeTests() {
         let clock = Clock()
         var mode = showing(at: clock)
         clock.now += 200
-        expectEqual(mode.trackChanged(track(at: 0)), [.seek(position: ClipMode.startLead), .resume])
+        expectEqual(mode.trackChanged(track(at: 0)), [.seek(position: ClipMode.seekLead), .resume])
     }
 
     test("a scrub shows up at the next event and moves the clip") {

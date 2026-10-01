@@ -29,7 +29,12 @@ final class StreamSession {
     private var stallCounter = 0
     private var finished = false
     private var wantsPlay = true
+    /// Sought and held on the frame until `release(after:)`, so playback can begin at the
+    /// moment the song reaches it rather than whenever the seek happens to land.
+    private var holding = false
     private(set) var isPositioned = false
+    /// Called with the position once the picture is held there; without it a seek plays on.
+    var onHeld: ((TimeInterval) -> Void)?
 
     init(url: URL, player: AVQueuePlayer, onFailure: @escaping (StreamFailure) -> Void) {
         self.url = url
@@ -69,7 +74,7 @@ final class StreamSession {
                 case .paused:
                     // An unasked-for pause (an empty queue, a system interruption) is a stall;
                     // pause() clears the stall itself before calling player.pause().
-                    if self.wantsPlay { self.stalled() } else { self.clearStall() }
+                    if self.wantsPlay, !self.holding { self.stalled() } else { self.clearStall() }
                 case .waitingToPlayAtSpecifiedRate:
                     self.stalled()
                 default:
@@ -111,7 +116,7 @@ final class StreamSession {
         stalled()
         // While the first item is still loading, the pending seek will call play() itself;
         // playing here first would start the stream at 0 before the seek lands.
-        if pendingSeek == nil { player.play() }
+        if pendingSeek == nil, !holding { player.play() }
     }
 
     /// defaultRate is what play() resumes at, so a nudge survives a pause and the start seek.
@@ -123,14 +128,42 @@ final class StreamSession {
 
     /// An item that is not ready yet must not be sought (AVPlayerItem raises), so the
     /// position waits for itemReady like the start position does.
-    func seek(to position: TimeInterval) {
+    func jump(to position: TimeInterval) {
         guard !finished, let item = player.currentItem else { return }
         guard item.status == .readyToPlay, pendingSeek == nil else {
             pendingSeek = (item, position)
             return
         }
+        hold()
         item.seek(to: CMTime(seconds: position, preferredTimescale: 600),
-                  toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
+                  toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] done in
+            DispatchQueue.main.async { self?.held(at: position, landed: done) }
+        }
+    }
+
+    func release(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.finished, self.holding else { return }
+            self.holding = false
+            if self.wantsPlay { self.player.play() }
+        }
+    }
+
+    private func hold() {
+        guard onHeld != nil else { return }
+        holding = true
+        player.pause()
+    }
+
+    private func held(at position: TimeInterval, landed: Bool) {
+        guard !finished else { return }
+        isPositioned = true
+        if holding, landed, let onHeld {
+            onHeld(position)
+        } else {
+            holding = false
+            if wantsPlay { player.play() }
+        }
     }
 
     private func makeItem() -> AVPlayerItem {
@@ -155,14 +188,10 @@ final class StreamSession {
     private func itemReady(_ item: AVPlayerItem) {
         guard let pending = pendingSeek, pending.item === item else { return }
         pendingSeek = nil
+        hold()
         item.seek(to: CMTime(seconds: pending.position, preferredTimescale: 600),
-                  toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isPositioned = true
-                guard self.wantsPlay else { return }
-                self.player.play()
-            }
+                  toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] done in
+            DispatchQueue.main.async { self?.held(at: pending.position, landed: done) }
         }
     }
 

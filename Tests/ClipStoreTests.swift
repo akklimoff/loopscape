@@ -18,18 +18,28 @@ func storeTests() {
         let file = try temporaryDirectory().appendingPathComponent("clips.json")
         let store = ClipStore(file: file)
         store.record(.video("v"), for: "a")
-        expectEqual(store.offset(for: "a"), nil)
-        store.recordOffset(2.05, for: "a")
-        expectEqual(ClipStore(file: file).offset(for: "a"), 2.05)
+        expectEqual(store.offsets(for: "a"), nil)
+        var offsets = OffsetMap()
+        offsets.set(2.05, at: 15)
+        offsets.set(4, at: 90)
+        store.recordOffsets(offsets, for: "a")
+        expectEqual(ClipStore(file: file).offsets(for: "a"), offsets)
         expectEqual(store.lookup("a"), .video("v"))
         store.record(.video("w"), for: "a")
-        expectEqual(store.offset(for: "a"), nil)
+        expectEqual(store.offsets(for: "a"), nil)
+    }
+
+    test("a single offset written by an earlier version still loads") {
+        let file = try temporaryDirectory().appendingPathComponent("clips.json")
+        let edited = #"{ "a": { "video": "v", "checked": "2026-10-01T10:17:30Z", "offset": 1.71 } }"#
+        try edited.write(to: file, atomically: true, encoding: .utf8)
+        expectEqual(ClipStore(file: file).offsets(for: "a")?.offset(at: 100), 1.71)
     }
 
     test("an offset is not recorded for a track without a video") {
         let file = try temporaryDirectory().appendingPathComponent("clips.json")
         let store = ClipStore(file: file)
-        store.recordOffset(1, for: "a")
+        store.recordOffsets(OffsetMap(stored: 1), for: "a")
         expectEqual(store.lookup("a"), nil)
     }
 

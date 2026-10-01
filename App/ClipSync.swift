@@ -12,8 +12,10 @@ enum SyncAction: Equatable {
 struct ClipSync {
     static let startNudgingBeyond: TimeInterval = 0.15
     static let stopNudgingWithin: TimeInterval = 0.04
-    static let seekBeyond: TimeInterval = 3
-    static let maxNudge = 0.1
+    /// A seek holds the picture still for well under a second and lands within a frame or
+    /// two; nudging a full second away at the largest rate takes five.
+    static let seekBeyond: TimeInterval = 1
+    static let maxNudge = 0.2
     /// How long a nudge should take to close the gap, before the cap applies.
     static let catchUpWindow: TimeInterval = 4
 
@@ -25,7 +27,7 @@ struct ClipSync {
         let offset = clipTime - trackTime
         if abs(offset) > Self.seekBeyond {
             isNudging = false
-            return .seek(trackTime + ClipMode.startLead)
+            return .seek(trackTime + ClipMode.seekLead)
         }
         let threshold = isNudging ? Self.stopNudgingWithin : Self.startNudgingBeyond
         guard abs(offset) > threshold else { return settle() }

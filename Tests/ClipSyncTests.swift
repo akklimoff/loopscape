@@ -35,7 +35,12 @@ func clipSyncTests() {
 
     test("a gap too wide to catch up on is sought, ahead by the start lead") {
         var sync = ClipSync()
-        expectEqual(sync.decide(clipTime: 50, trackTime: 60), .seek(60 + ClipMode.startLead))
+        expectEqual(sync.decide(clipTime: 50, trackTime: 60), .seek(60 + ClipMode.seekLead))
+    }
+
+    test("a gap over a second is jumped rather than nudged for long") {
+        var sync = ClipSync()
+        expectEqual(sync.decide(clipTime: 58.7, trackTime: 60), .seek(60 + ClipMode.seekLead))
     }
 
     test("past the end of a shorter clip there is nothing to line up") {

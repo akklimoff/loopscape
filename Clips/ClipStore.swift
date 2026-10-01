@@ -38,15 +38,18 @@ final class ClipStore {
         save(records)
     }
 
-    func offset(for trackID: String) -> TimeInterval? {
+    func offsets(for trackID: String) -> OffsetMap? {
         guard let record = load()[trackID] as? [String: Any], record["video"] is String else { return nil }
-        return (record["offset"] as? NSNumber)?.doubleValue
+        if let points = record["offsets"] as? [[Double]] { return OffsetMap(stored: points) }
+        if let single = (record["offset"] as? NSNumber)?.doubleValue { return OffsetMap(stored: single) }
+        return nil
     }
 
-    func recordOffset(_ offset: TimeInterval, for trackID: String) {
+    func recordOffsets(_ offsets: OffsetMap, for trackID: String) {
         var records = load()
         guard var record = records[trackID] as? [String: Any], record["video"] is String else { return }
-        record["offset"] = (offset * 100).rounded() / 100
+        record["offset"] = nil
+        record["offsets"] = offsets.stored
         records[trackID] = record
         save(records)
     }

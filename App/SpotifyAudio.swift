@@ -3,9 +3,10 @@ import AppKit
 import CoreAudio
 import os.log
 
-/// Records what Spotify is playing through a Core Audio process tap: only Spotify's own
-/// output, held in memory, never written anywhere. The first tap asks for the "System Audio
-/// Recording" permission; a declined one delivers silence rather than an error.
+/// Listens to what Spotify is playing through a Core Audio process tap: only Spotify's own
+/// output, the last few seconds of it held in memory, never written anywhere. The first tap
+/// asks for the "System Audio Recording" permission; a declined one delivers silence rather
+/// than an error. One tap stays up for as long as a clip plays, rather than one per check.
 @available(macOS 14.2, *)
 final class SpotifyAudio {
     struct Recording {
@@ -18,34 +19,47 @@ final class SpotifyAudio {
     enum Failure: Error {
         case notRunning
         case coreAudio(String, OSStatus)
-        case silent
     }
 
     /// The tap delivers 48 kHz; the onset envelope needs nowhere near that.
     private static let decimation = 4
+    private static let kept: TimeInterval = 20
 
     private let queue = DispatchQueue(label: "com.aklimoff.loopscape.spotify-audio")
     private var tap = AudioObjectID(kAudioObjectUnknown)
     private var aggregate = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var samples: [Float] = []
-    private var firstHostTime: UInt64?
+    /// Host time just past the newest sample.
+    private var endHostTime: UInt64?
     private var format: AudioStreamBasicDescription?
 
-    static func record(seconds: TimeInterval, completion: @escaping (Result<Recording, Failure>) -> Void) {
-        let recorder = SpotifyAudio()
+    static func listen() throws -> SpotifyAudio {
+        let listener = SpotifyAudio()
         do {
-            try recorder.start()
-        } catch let failure as Failure {
-            recorder.stop()
-            return completion(.failure(failure))
+            try listener.start()
         } catch {
-            recorder.stop()
-            return completion(.failure(.coreAudio("start", -1)))
+            listener.stop()
+            throw error
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
-            recorder.stop()
-            completion(recorder.result())
+        return listener
+    }
+
+    deinit { stop() }
+
+    /// The newest `seconds` heard, or nil while fewer have been heard or Spotify was silent.
+    func recent(seconds: TimeInterval) -> Recording? {
+        queue.sync {
+            guard let endHostTime, let format else { return nil }
+            let rate = format.mSampleRate / Double(Self.decimation)
+            let count = Int(seconds * rate)
+            guard samples.count >= count else { return nil }
+            let heard = Array(samples.suffix(count))
+            guard heard.contains(where: { abs($0) > 1e-4 }) else { return nil }
+            let sinceEnd = Double(Int64(bitPattern: mach_absolute_time() &- endHostTime)) * Self.secondsPerHostTick
+            let endedAt = Date().addingTimeInterval(-sinceEnd)
+            return Recording(samples: heard, sampleRate: rate,
+                             startedAt: endedAt.addingTimeInterval(-Double(count) / rate))
         }
     }
 
@@ -84,8 +98,8 @@ final class SpotifyAudio {
         guard var format, let avFormat = AVAudioFormat(streamDescription: &format),
               let buffer = AVAudioPCMBuffer(pcmFormat: avFormat, bufferListNoCopy: input),
               let channels = buffer.floatChannelData else { return }
-        if firstHostTime == nil { firstHostTime = hostTime }
         let frames = Int(buffer.frameLength)
+        endHostTime = hostTime &+ UInt64(Double(frames) / avFormat.sampleRate / Self.secondsPerHostTick)
         let channelCount = Int(avFormat.channelCount)
         let stride = avFormat.isInterleaved ? channelCount : 1
         let lanes = avFormat.isInterleaved ? 1 : channelCount
@@ -102,9 +116,11 @@ final class SpotifyAudio {
             samples.append(sum / Float(Self.decimation * channelCount))
             frame += Self.decimation
         }
+        let limit = Int(Self.kept * avFormat.sampleRate) / Self.decimation
+        if samples.count > limit + limit / 4 { samples.removeFirst(samples.count - limit) }
     }
 
-    private func stop() {
+    func stop() {
         if aggregate != kAudioObjectUnknown {
             AudioDeviceStop(aggregate, procID)
             if let procID { AudioDeviceDestroyIOProcID(aggregate, procID) }
@@ -114,17 +130,6 @@ final class SpotifyAudio {
         if tap != kAudioObjectUnknown {
             AudioHardwareDestroyProcessTap(tap)
             tap = AudioObjectID(kAudioObjectUnknown)
-        }
-    }
-
-    private func result() -> Result<Recording, Failure> {
-        queue.sync {
-            guard let firstHostTime, let format, samples.contains(where: { abs($0) > 1e-4 }) else {
-                return .failure(.silent)
-            }
-            let age = Double(mach_absolute_time() &- firstHostTime) * Self.secondsPerHostTick
-            return .success(Recording(samples: samples, sampleRate: format.mSampleRate / Double(Self.decimation),
-                                      startedAt: Date().addingTimeInterval(-age)))
         }
     }
 
