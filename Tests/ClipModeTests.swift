@@ -68,9 +68,39 @@ func clipModeTests() {
         expectEqual(mode.trackChanged(track(at: 32, playing: false)), [])
         clock.now += 5
         expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
-                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 32)])
+                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 32),
+                     .pauseTimeout(after: ClipMode.pauseLimit - 5)])
         expect(mode.isClipPaused, "a paused track holds its clip")
         expectEqual(mode.clipPosition, 32)
+    }
+
+    test("a pause that outlasts the limit takes the clip off, and play brings it back") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.trackChanged(track(at: 30, playing: false))
+        clock.now += ClipMode.pauseLimit
+        expectEqual(mode.pauseTimedOut(), [.leave])
+        expect(!mode.isClipPaused, "the pack plays on while Spotify stays paused")
+        expectEqual(mode.trackChanged(track(at: 30)), [.resolve(query(), generation: 3)])
+    }
+
+    test("an earlier pause's timer does nothing to a later pause") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.trackChanged(track(at: 30, playing: false))
+        clock.now += 5
+        _ = mode.trackChanged(track(at: 30))
+        clock.now += 3
+        _ = mode.trackChanged(track(at: 33, playing: false))
+        clock.now += 2
+        expectEqual(mode.pauseTimedOut(), [])
+    }
+
+    test("a playing clip is never timed out") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 60
+        expectEqual(mode.pauseTimedOut(), [])
     }
 
     test("only the last of several quick skips gets a clip") {
@@ -97,7 +127,7 @@ func clipModeTests() {
         var mode = showing()
         expectEqual(mode.trackChanged(track("spotify:track:B")),
                     [.resolve(query("spotify:track:B"), generation: 2)])
-        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause])
+        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
         expectEqual(mode.resolved(.failed, generation: 2), [.leave])
     }
 
@@ -105,7 +135,7 @@ func clipModeTests() {
         let clock = Clock()
         var mode = showing(at: clock)
         clock.now += 10
-        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [.pause])
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
         clock.now += 60
         expectEqual(mode.trackChanged(track(at: 40, playing: true)), [.resume])
     }
@@ -224,14 +254,14 @@ func clipModeTests() {
         let clock = Clock()
         var mode = showing(at: clock)
         clock.now += 10
-        expectEqual(mode.trackChanged(track(at: 100, playing: false)), [.seek(position: 100), .pause])
+        expectEqual(mode.trackChanged(track(at: 100, playing: false)), [.seek(position: 100), .pause, .pauseTimeout(after: ClipMode.pauseLimit)])
     }
 
     test("a position within the drift allowance does not seek") {
         let clock = Clock()
         var mode = showing(at: clock)
         clock.now += 10
-        expectEqual(mode.trackChanged(track(at: 41, playing: false)), [.pause])
+        expectEqual(mode.trackChanged(track(at: 41, playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
     }
 
     test("a failed resolve of a playing track asks for one retry later, not a loop") {
@@ -258,7 +288,7 @@ func clipModeTests() {
     test("the previous clip stays paused with Spotify while the next track resolves") {
         var mode = showing()
         _ = mode.trackChanged(track("spotify:track:B"))
-        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause])
+        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
         expect(mode.isClipPaused, "a paused Spotify must hold the clip still on screen")
         _ = mode.trackChanged(track("spotify:track:B"))
         expect(!mode.isClipPaused, "playing again releases it")

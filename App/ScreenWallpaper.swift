@@ -86,6 +86,12 @@ final class ScreenWallpaper {
         view.playerLayer.player = shared
     }
 
+    /// A looper's first item can take a beat to load; until then the window shows black.
+    var isShowingPack: Bool {
+        guard stream == nil, player.currentItem?.status == .readyToPlay else { return false }
+        return player.rate == 0 || player.currentTime().seconds > 0.05
+    }
+
     func pause() { if let stream { stream.pause() } else { player.pause() } }
 
     /// A desktop-level window is not always carried into a fullscreen space created after

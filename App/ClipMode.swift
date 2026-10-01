@@ -14,6 +14,7 @@ enum ClipEffect: Equatable {
     case play(videoID: String, url: URL, position: TimeInterval)
     case seek(position: TimeInterval)
     case retryLater(trackID: String, after: TimeInterval)
+    case pauseTimeout(after: TimeInterval)
     case pause
     case resume
     case leave
@@ -31,6 +32,9 @@ struct ClipMode {
     static let failuresBeforeBackoff = 3
     static let backoff: TimeInterval = 15 * 60
     static let retryDelay: TimeInterval = 15
+    /// A frozen frame reads as "the clip is paused" for a moment; past this it reads as a
+    /// broken wallpaper, and the pack is better until Spotify plays again.
+    static let pauseLimit: TimeInterval = 10
     private enum Phase: Equatable {
         case idle
         case resolving(trackID: String, generation: Int)
@@ -98,11 +102,12 @@ struct ClipMode {
         if sameTrack {
             switch phase {
             case .showing:
-                let toggle: ClipEffect = new.isPlaying ? .resume : .pause
-                guard let expected, abs(new.position - expected) > Self.driftAllowance else { return [toggle] }
-                return [.seek(position: startPosition(of: new)), toggle]
+                let toggle = new.isPlaying ? [ClipEffect.resume] : [.pause, .pauseTimeout(after: Self.pauseLimit)]
+                guard let expected, abs(new.position - expected) > Self.driftAllowance else { return toggle }
+                return [.seek(position: startPosition(of: new))] + toggle
             case .resolving:
-                return clipOnScreen ? [new.isPlaying ? .resume : .pause] : []
+                guard clipOnScreen else { return [] }
+                return new.isPlaying ? [.resume] : [.pause, .pauseTimeout(after: Self.pauseLimit)]
             case .idle:
                 return new.isPlaying ? start(new) : []
             case .missing:
@@ -127,7 +132,9 @@ struct ClipMode {
         case .found(let videoID, let url):
             phase = .showing(trackID: trackID)
             clipOnScreen = true
-            return [.play(videoID: videoID, url: url, position: startPosition(of: track))]
+            let play = ClipEffect.play(videoID: videoID, url: url, position: startPosition(of: track))
+            guard !track.isPlaying else { return [play] }
+            return [play, .pauseTimeout(after: Self.pauseLimit - now().timeIntervalSince(trackSeen))]
         case .notFound:
             phase = .missing(trackID: trackID)
             return takeClipOff()
@@ -151,6 +158,16 @@ struct ClipMode {
             }
             return effects
         }
+    }
+
+    /// Spotify sends nothing while it stays paused, so the timer armed by the pause asks
+    /// back; a newer event since then has armed its own.
+    mutating func pauseTimedOut() -> [ClipEffect] {
+        guard clipOnScreen, let track, !track.isPlaying,
+              now().timeIntervalSince(trackSeen) >= Self.pauseLimit - 0.05 else { return [] }
+        generation += 1
+        phase = .idle
+        return takeClipOff()
     }
 
     /// A pack picked from the menu replaces the clip, and the track playing now does not bring

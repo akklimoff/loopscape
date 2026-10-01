@@ -2,14 +2,18 @@ import Foundation
 import os.log
 
 /// Runs one curtain across every display and sequences the work that has to happen behind
-/// it: a wallpaper swap queued with `whenCovered` runs once the pack has fully left, and a
-/// reveal asked for earlier waits for those swaps.
+/// it: a wallpaper swap queued with `whenCovered` runs once the old wallpaper has fully
+/// left, and then `onCovered` asks the owner afresh whether anything still holds it down —
+/// a reveal asked for before that moment may be stale by then.
 final class CurtainDirector {
     var style: CurtainStyle
+    var onCovered: (() -> Void)?
+
+    var isDown: Bool { !curtain.isClear }
 
     private var curtain = Curtain()
     private var afterCover: [() -> Void] = []
-    private var revealWanted = false
+    private var runningActions = false
     private var wakeToken = 0
     private var views: [CurtainView] = []
 
@@ -29,7 +33,6 @@ final class CurtainDirector {
     }
 
     func cover() {
-        revealWanted = false
         guard CurtainView.isAvailable, curtain.cover(style: style, at: Date()) else { return }
         os_log("curtain: cover (%{public}@)", style.rawValue)
         refreshViews()
@@ -43,17 +46,7 @@ final class CurtainDirector {
     }
 
     func reveal() {
-        guard curtain.coveredAt != nil else { return }
-        guard curtain.isCovered(at: Date()), afterCover.isEmpty else {
-            revealWanted = true
-            return
-        }
-        startReveal()
-    }
-
-    private func startReveal() {
-        revealWanted = false
-        guard curtain.reveal(at: Date()) else { return }
+        guard afterCover.isEmpty, !runningActions, curtain.reveal(at: Date()) else { return }
         os_log("curtain: reveal")
         if let end = curtain.revealEndsAt { wake(at: end) }
     }
@@ -74,8 +67,10 @@ final class CurtainDirector {
             guard now >= coveredAt else { return wake(at: coveredAt) }
             let actions = afterCover
             afterCover = []
+            runningActions = true
             actions.forEach { $0() }
-            if revealWanted, curtain.coveredAt != nil { startReveal() }
+            runningActions = false
+            onCovered?()
         } else if curtain.settle(at: now) {
             os_log("curtain: clear")
             refreshViews()

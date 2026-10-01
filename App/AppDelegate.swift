@@ -84,10 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clipMode = ClipMode(isEnabled: false)
     private var resolver: ClipResolver?
     private let clipQueue = DispatchQueue(label: "com.aklimoff.loopscape.clips")
-    private lazy var curtain = CurtainDirector(
-        style: CurtainStyle(rawValue: defaults.string(forKey: Key.curtain) ?? "") ?? .silk)
-    /// A curtain hiding a clip that has no picture yet must stay down until it has one.
+    private lazy var curtain: CurtainDirector = {
+        let director = CurtainDirector(
+            style: CurtainStyle(rawValue: defaults.string(forKey: Key.curtain) ?? "") ?? .silk)
+        director.onCovered = { [weak self] in self?.settleCurtain() }
+        return director
+    }()
+    /// A curtain hiding a wallpaper that has no picture yet must stay down until it has one.
     private var awaitingFirstFrame = false
+    private var packWait = 0
     /// Bumped when a different clip starts, not when the same one restarts, so a pack swap
     /// queued behind the curtain can tell that a newer clip has taken the screen.
     private var streamGeneration = 0
@@ -458,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let target = url(for: slug)
         for wallpaper in wallpapers { wallpaper.play(target) }
         if isPaused || displaysAsleep { wallpapers.forEach { $0.pause() } }
+        if curtain.isDown { awaitPackFrame() }
     }
 
     /// While the next track resolves, the clip on screen belongs to the previous one and the
@@ -470,6 +476,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let slug = currentSlug {
             startPlayback(slug)
             syncDesktopPicture(slug)
+        }
+    }
+
+    private func awaitPackFrame() {
+        awaitingFirstFrame = true
+        packWait += 1
+        checkPackFrame(packWait, until: Date().addingTimeInterval(2))
+    }
+
+    private func checkPackFrame(_ wait: Int, until deadline: Date) {
+        guard wait == packWait, stream == nil else { return }
+        guard wallpapers.allSatisfy(\.isShowingPack) || Date() >= deadline else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.checkPackFrame(wait, until: deadline)
+            }
+            return
+        }
+        awaitingFirstFrame = false
+        settleCurtain()
+    }
+
+    private func switchPack(to slug: String) {
+        let generation = streamGeneration
+        curtain.whenCovered { [weak self] in
+            guard let self, self.streamGeneration == generation else { return }
+            self.applySelection(slug)
         }
     }
 
@@ -611,6 +643,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     guard let self else { return }
                     self.apply(self.clipMode.retryFailed(trackID: trackID))
                 }
+            case .pauseTimeout(let delay):
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self else { return }
+                    let effects = self.clipMode.pauseTimedOut()
+                    if !effects.isEmpty { os_log("clip: paused for %{public}.0f s — the pack plays meanwhile", ClipMode.pauseLimit) }
+                    self.apply(effects)
+                }
             case .seek(let position):
                 os_log("clip: resync to %{public}.1f s", position)
                 streamPlayback?.session.seek(to: position)
@@ -620,7 +659,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 curtain.whenCovered { [weak self] in
                     guard let self, self.streamGeneration == generation else { return }
                     self.leaveStream()
-                    self.settleCurtain()
                 }
             }
         }
@@ -679,7 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rotation = Timer(timeInterval: Double(minutes) * 60,
                              repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.applySelection(self.pick())
+            self.switchPack(to: self.pick())
         }
         rotation.tolerance = 30
         // .common keeps the timer ticking while the status menu is open; App Nap would
@@ -783,6 +821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         intervals.submenu = submenu
         menu.addItem(intervals)
+        menu.addItem(curtainItem())
 
         menu.addItem(.separator())
 
@@ -820,9 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clips.target = self
         clips.state = clipMode.isEnabled ? .on : .off
         menu.addItem(clips)
-        guard clipMode.isEnabled else { return }
-        menu.addItem(curtainItem())
-        guard YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
+        guard clipMode.isEnabled, YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
         let hint = NSMenuItem(title: Lang.t("Needs yt-dlp: brew install yt-dlp",
                                             "Нужен yt-dlp: brew install yt-dlp"),
                               action: nil, keyEquivalent: "")
@@ -831,7 +868,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func curtainItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Transition to a clip", "Переход к клипу"),
+        let item = NSMenuItem(title: Lang.t("Transition", "Переход"),
                               action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -908,7 +945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clipMode.packChosen()
         defaults.set(false, forKey: Key.paused)
         restartTimer()
-        applySelection(slug)
+        switchPack(to: slug)
     }
 
     @objc private func setInterval(_ sender: NSMenuItem) {
@@ -965,7 +1002,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(false, forKey: Key.paused)
         restartTimer()
         let index = packs.firstIndex { $0.slug == currentSlug } ?? -1
-        applySelection(packs[(index + 1) % packs.count].slug)
+        switchPack(to: packs[(index + 1) % packs.count].slug)
     }
 
     @objc private func toggleLoginItem() {
