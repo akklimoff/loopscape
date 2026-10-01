@@ -9,12 +9,19 @@ enum ResolveOutcome: Equatable {
 enum ClipEffect: Equatable {
     case resolve(TrackQuery, generation: Int)
     case play(videoID: String, url: URL, position: TimeInterval)
+    case seek(position: TimeInterval)
     case pause
     case resume
     case leave
 }
 
 struct ClipMode {
+    /// An exact seek plus the first frame took 1.4–2.0 s in the live runs, so a playing clip
+    /// is started that far ahead of the song to land level with it.
+    static let startLead: TimeInterval = 1.5
+    /// Extrapolation drifts by a few hundred milliseconds; beyond this the song was scrubbed
+    /// or restarted, and a seek is worth its frozen second.
+    static let driftAllowance: TimeInterval = 2
     private enum Phase: Equatable {
         case idle
         case resolving(trackID: String, generation: Int)
@@ -41,7 +48,7 @@ struct ClipMode {
 
     var clipPlayback: (position: TimeInterval, paused: Bool)? {
         guard case .showing = phase, clipOnScreen, let track else { return nil }
-        return (position(of: track), !track.isPlaying)
+        return (startPosition(of: track), !track.isPlaying)
     }
 
     func isCurrent(_ generation: Int) -> Bool {
@@ -59,6 +66,7 @@ struct ClipMode {
 
     mutating func trackChanged(_ new: Track?) -> [ClipEffect] {
         let sameTrack = new != nil && new?.id == track?.id
+        let expected = track.map(position(of:))
         track = new
         trackSeen = now()
         guard isEnabled else { return [] }
@@ -66,7 +74,9 @@ struct ClipMode {
         if sameTrack {
             switch phase {
             case .showing:
-                return [new.isPlaying ? .resume : .pause]
+                let toggle: ClipEffect = new.isPlaying ? .resume : .pause
+                guard let expected, abs(new.position - expected) > Self.driftAllowance else { return [toggle] }
+                return [.seek(position: startPosition(of: new)), toggle]
             case .resolving:
                 return clipOnScreen ? [new.isPlaying ? .resume : .pause] : []
             case .idle:
@@ -88,7 +98,7 @@ struct ClipMode {
         case .found(let videoID, let url):
             phase = .showing(trackID: trackID)
             clipOnScreen = true
-            return [.play(videoID: videoID, url: url, position: position(of: track))]
+            return [.play(videoID: videoID, url: url, position: startPosition(of: track))]
         case .notFound:
             phase = .missing(trackID: trackID)
             return takeClipOff()
@@ -163,6 +173,10 @@ struct ClipMode {
         guard clipOnScreen else { return [] }
         clipOnScreen = false
         return [.leave]
+    }
+
+    private func startPosition(of track: Track) -> TimeInterval {
+        position(of: track) + (track.isPlaying ? Self.startLead : 0)
     }
 
     /// Spotify reports the position only when something changes, so a playing track's

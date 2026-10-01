@@ -526,6 +526,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
                 if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
+            case .seek(let position):
+                os_log("clip: resync to %{public}.1f s", position)
+                if stream != nil { wallpapers.forEach { $0.seek(to: position) } }
             case .leave:
                 os_log("clip: back to the pack")
                 leaveStream()
@@ -810,6 +813,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(!isPaused, forKey: Key.paused)
         if isPaused {
             wallpapers.forEach { $0.pause() }
+        } else if stream != nil {
+            // The song played on while the wallpaper was paused; resuming the frozen frame
+            // would leave the clip behind it by the whole pause.
+            restorePlayback()
         } else {
             if shouldPlay { wallpapers.forEach { $0.resume() } }
             repaintDesktopPicture()

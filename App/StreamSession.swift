@@ -114,6 +114,18 @@ final class StreamSession {
         if pendingSeek == nil { player.play() }
     }
 
+    /// While the first item still loads, the pending seek simply takes the new position.
+    func seek(to position: TimeInterval) {
+        guard !finished else { return }
+        if let pending = pendingSeek {
+            pendingSeek = (pending.item, position)
+            return
+        }
+        player.currentItem?.seek(to: CMTime(seconds: position, preferredTimescale: 600),
+                                 toleranceBefore: .zero, toleranceAfter: .zero,
+                                 completionHandler: nil)
+    }
+
     private func makeItem() -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
         owned.append(item)

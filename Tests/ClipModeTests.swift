@@ -24,6 +24,13 @@ func clipModeTests() {
         return mode
     }
 
+    func showing(at clock: Clock) -> ClipMode {
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        _ = mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1)
+        return mode
+    }
+
     test("with clips off a playing track is not searched") {
         var mode = ClipMode(isEnabled: false)
         expectEqual(mode.trackChanged(track()), [])
@@ -40,7 +47,7 @@ func clipModeTests() {
         _ = mode.trackChanged(track(at: 30))
         clock.now += 4
         expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
-                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 34)])
+                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 34 + ClipMode.startLead)])
         expectEqual(mode.clipPlayback?.paused, false)
     }
 
@@ -65,7 +72,7 @@ func clipModeTests() {
         expect(mode.isCurrent(5), "the last skip's resolve must run")
         expectEqual(mode.resolved(.found(videoID: "first", url: url), generation: 1), [])
         expectEqual(mode.resolved(.found(videoID: "last", url: url), generation: 5),
-                    [.play(videoID: "last", url: url, position: 30)])
+                    [.play(videoID: "last", url: url, position: 30 + ClipMode.startLead)])
     }
 
     test("a track without a video leaves the pack alone, paused or not") {
@@ -86,8 +93,11 @@ func clipModeTests() {
     }
 
     test("Spotify's pause and resume pause and resume the clip") {
-        var mode = showing()
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
         expectEqual(mode.trackChanged(track(at: 40, playing: false)), [.pause])
+        clock.now += 60
         expectEqual(mode.trackChanged(track(at: 40, playing: true)), [.resume])
     }
 
@@ -192,5 +202,26 @@ func clipModeTests() {
         _ = mode.resolved(.failed, generation: 1)
         _ = mode.trackChanged(track(at: 40, playing: false))
         expectEqual(mode.networkReturned(), [])
+    }
+
+    test("a repeat of the same track sends the clip back to the start") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 200
+        expectEqual(mode.trackChanged(track(at: 0)), [.seek(position: ClipMode.startLead), .resume])
+    }
+
+    test("a scrub shows up at the next event and moves the clip") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.trackChanged(track(at: 100, playing: false)), [.seek(position: 100), .pause])
+    }
+
+    test("a position within the drift allowance does not seek") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.trackChanged(track(at: 41, playing: false)), [.pause])
     }
 }

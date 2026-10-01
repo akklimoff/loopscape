@@ -28,8 +28,6 @@ final class ScreenWallpaper {
     private var stream: StreamSession?
 
     var onStreamFailure: ((StreamFailure) -> Void)?
-    var isStreaming: Bool { stream != nil }
-
     var streamPosition: TimeInterval? {
         guard stream != nil else { return nil }
         let seconds = player.currentTime().seconds
@@ -96,6 +94,8 @@ final class ScreenWallpaper {
     }
 
     func pause() { if let stream { stream.pause() } else { player.pause() } }
+
+    func seek(to position: TimeInterval) { stream?.seek(to: position) }
 
     /// A desktop-level window is not always carried into a fullscreen space created after
     /// it was ordered in; re-ordering on every space change makes it show up there too.
