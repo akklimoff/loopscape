@@ -10,7 +10,7 @@ enum ClipEffect: Equatable {
     case resolve(TrackQuery, generation: Int)
     case play(videoID: String, url: URL, position: TimeInterval)
     case seek(position: TimeInterval)
-    case retryLater
+    case retryLater(trackID: String)
     case pause
     case resume
     case leave
@@ -89,6 +89,7 @@ struct ClipMode {
                 return new.isPlaying ? start(new) : []
             }
         }
+        laterRetriedTrackID = nil
         guard new.isPlaying else { return leave() }
         return start(new)
     }
@@ -112,7 +113,7 @@ struct ClipMode {
             // without looping on an outage or a rate limit.
             if track.isPlaying, laterRetriedTrackID != trackID {
                 laterRetriedTrackID = trackID
-                effects.append(.retryLater)
+                effects.append(.retryLater(trackID: trackID))
             }
             return effects
         }
@@ -146,9 +147,10 @@ struct ClipMode {
         return [.resolve(query, generation: generation)]
     }
 
-    mutating func retryFailed() -> [ClipEffect] {
+    /// nil retries whatever track failed; a delayed retry names the track it was armed for.
+    mutating func retryFailed(trackID wanted: String? = nil) -> [ClipEffect] {
         guard isEnabled, case .failed(let trackID) = phase, let track, track.id == trackID,
-              track.isPlaying else { return [] }
+              wanted == nil || wanted == trackID, track.isPlaying else { return [] }
         return start(track)
     }
 

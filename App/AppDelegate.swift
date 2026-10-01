@@ -526,10 +526,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
                 if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
-            case .retryLater:
+            case .retryLater(let trackID):
                 DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
                     guard let self else { return }
-                    self.apply(self.clipMode.retryFailed())
+                    self.apply(self.clipMode.retryFailed(trackID: trackID))
                 }
             case .seek(let position):
                 os_log("clip: resync to %{public}.1f s", position)

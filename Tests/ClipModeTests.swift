@@ -161,7 +161,7 @@ func clipModeTests() {
     test("a failed resolve is retried when the same track resumes") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
-        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater])
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A")])
         expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
         expectEqual(mode.trackChanged(track(at: 40)), [.resolve(query(), generation: 2)])
     }
@@ -228,8 +228,20 @@ func clipModeTests() {
     test("a failed resolve of a playing track asks for one retry later, not a loop") {
         var mode = ClipMode(isEnabled: true)
         _ = mode.trackChanged(track())
-        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater])
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A")])
         expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
         expectEqual(mode.resolved(.failed, generation: 2), [])
+    }
+
+    test("a delayed retry belongs to its track, and a track played again gets a new one") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:A"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expectEqual(mode.resolved(.failed, generation: 2), [.retryLater(trackID: "spotify:track:B")])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:B"), [.resolve(query("spotify:track:B"), generation: 3)])
+        _ = mode.trackChanged(track("spotify:track:A"))
+        expectEqual(mode.resolved(.failed, generation: 4), [.retryLater(trackID: "spotify:track:A")])
     }
 }

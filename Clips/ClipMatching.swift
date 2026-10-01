@@ -127,17 +127,27 @@ enum ClipMatching {
         guard !channel.hasSuffix(" topic") else { return nil }
         guard title.contains(" \(name) ") else { return nil }
 
+        let whole = NSRange(title.startIndex..., in: title)
+        let saysVideo = officialVideo.firstMatch(in: title, range: whole) != nil
+            || videoMarkers.contains(where: { title.contains(" \($0) ") })
+
         var channelIsArtist = false
+        var channelIsPerformer = false
         switch channelMatch(channel, artist: artist) {
         case .own:
             channelIsArtist = true
+            channelIsPerformer = true
         case .musicSuffix:
             channelIsArtist = titleHasArtist || !credited.isEmpty
+            channelIsPerformer = channelIsArtist
         case .none:
             if listed.count > 1, let own = listed.first(where: { channelMatch(channel, artist: $0) != .none }) {
-                let vouched = candidate.isVerified || credited.contains { $0 != own }
+                let vouched = candidate.isVerified || saysVideo || credited.contains { $0 != own }
                 let needsCredit = channelMatch(channel, artist: own) == .musicSuffix
                 channelIsArtist = vouched && (!needsCredit || !credited.isEmpty)
+                // The first listed artist is the performer, so their verified channel may
+                // carry the track as a cover; a featured artist's channel may not.
+                channelIsPerformer = channelIsArtist && candidate.isVerified && own == listed.first
             }
         }
         guard titleHasArtist || channelIsArtist else { return nil }
@@ -148,15 +158,13 @@ enum ClipMatching {
         for own in [name, artist] {
             if let range = rest.range(of: " \(own) ") { rest.replaceSubrange(range, with: " ") }
         }
-        let rejected = channelIsArtist
+        let rejected = channelIsPerformer
             ? rejectedWords.filter { !forgivenOnArtistChannel.contains($0) }
             : rejectedWords
         guard !rejected.contains(where: { rest.contains(" \($0) ") }) else { return nil }
 
         var points = 0
-        let whole = NSRange(title.startIndex..., in: title)
-        if officialVideo.firstMatch(in: title, range: whole) != nil
-            || videoMarkers.contains(where: { title.contains(" \($0) ") }) { points += 3 }
+        if saysVideo { points += 3 }
         if channelIsArtist { points += 3 }
         if candidate.isVerified { points += 1 }
         if track.seconds > 0, abs(duration - Double(track.seconds)) <= 10 { points += 1 }

@@ -169,4 +169,18 @@ func matchingTests() {
                               duration: 180, isVerified: false)
         expectEqual(ClipMatching.score(cover, for: track), nil)
     }
+
+    test("an unverified channel of a listed artist counts with an official-video title") {
+        let track = TrackQuery(id: "t", artist: "Sia, Sean Paul", name: "Cheap Thrills", seconds: 211)
+        let featured = Candidate(id: "s", title: "Sean Paul - Cheap Thrills (Official Video)",
+                                 channel: "Sean Paul", duration: 211, isVerified: false)
+        expectEqual(ClipMatching.score(featured, for: track), 7)
+    }
+
+    test("a cover is forgiven only on the channel of the whole artist") {
+        let track = TrackQuery(id: "t", artist: "Calvin Harris, Dua Lipa", name: "One Kiss", seconds: 214)
+        let cover = Candidate(id: "c", title: "One Kiss (Cover)", channel: "Dua Lipa",
+                              duration: 214, isVerified: true)
+        expectEqual(ClipMatching.score(cover, for: track), nil)
+    }
 }
