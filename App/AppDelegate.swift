@@ -618,6 +618,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     os_log("sync: Spotify declined Automation access — using the estimated position")
                     self.spotifyReadable = false
                     self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
+                case .failure(.failed(let code)):
+                    os_log("sync: Spotify did not answer (%d)", code)
+                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
                 default:
                     self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
                 }
