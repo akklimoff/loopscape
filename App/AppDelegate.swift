@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Spotify's pause holds a clip still the way the menu's Pause holds everything.
     private var displaysAsleep = false
     private let pathMonitor = NWPathMonitor()
+    private var terminationSignal: DispatchSourceSignal?
     private var network: (online: Bool, interfaces: [String])?
     private var shouldPlay: Bool {
         !isPaused && !displaysAsleep && !clipMode.isClipPaused
@@ -124,6 +125,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async { self?.networkChanged(online: online, interfaces: interfaces) }
         }
         pathMonitor.start(queue: .global(qos: .utility))
+
+        // `pkill` (build.sh, logout scripts) sends SIGTERM, which skips
+        // applicationWillTerminate and would leave a clip's still as the desktop picture.
+        signal(SIGTERM, SIG_IGN)
+        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termination.setEventHandler { NSApp.terminate(nil) }
+        termination.resume()
+        terminationSignal = termination
 
         NotificationCenter.default.addObserver(
             self,

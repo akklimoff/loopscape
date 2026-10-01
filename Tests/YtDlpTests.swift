@@ -117,4 +117,29 @@ func ytDlpTests() {
         expect(thrown != nil, "a terminated run must throw")
         expect(Date().timeIntervalSince(began) < 6, "run was not cut short")
     }
+
+    test("terminateRunning also stops what yt-dlp started, such as deno") {
+        let holder = try temporaryDirectory()
+        let tool = holder.appendingPathComponent("yt-dlp")
+        let childFile = holder.appendingPathComponent("child")
+        try Data("#!/bin/sh\nsleep 30 &\necho $! > '\(childFile.path)'\nwait\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        let ytDlp = try YtDlp(directories: [holder.path])
+
+        let done = DispatchGroup()
+        DispatchQueue.global().async(group: done) { _ = try? ytDlp.search("anything") }
+        let began = Date()
+        var child: pid_t = 0
+        while child == 0, Date().timeIntervalSince(began) < 3 {
+            child = pid_t((try? String(contentsOf: childFile, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        expect(child > 0, "the fake yt-dlp never started its child")
+        YtDlp.terminateRunning()
+        _ = done.wait(timeout: .now() + 3)
+        Thread.sleep(forTimeInterval: 0.2)
+        expect(kill(child, 0) != 0, "the child outlived terminateRunning")
+        if kill(child, 0) == 0 { kill(child, SIGKILL) }
+    }
 }
