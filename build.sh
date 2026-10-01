@@ -14,7 +14,7 @@ if [[ "${1:-}" == "--test" ]]; then
     mkdir -p "$HERE/.build"
     echo "==> compiling tests"
     swiftc -swift-version 5 -target arm64-apple-macosx13.0 \
-        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE/App/LaunchOptions.swift" "$HERE/App/Track.swift" "$HERE/App/ClipMode.swift" "$HERE/App/Curtain.swift" "$HERE"/Tests/*.swift
+        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE/App/LaunchOptions.swift" "$HERE/App/Track.swift" "$HERE/App/ClipMode.swift" "$HERE/App/Curtain.swift" "$HERE/App/ClipSync.swift" "$HERE"/Tests/*.swift
     "$HERE/.build/tests" "$HERE/Tests/Fixtures"
     echo "==> compiling resolve"
     swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
@@ -100,6 +100,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Loopscape reads where Spotify is in the song to keep the music video in sync. It never controls playback.</string>
 </dict>
 </plist>
 PLIST

@@ -40,6 +40,16 @@ func clipModeTests() {
         expect(!mode.isResolving)
     }
 
+    test("the track position on a shown clip is extrapolated without the start lead") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 7
+        expectEqual(mode.trackPosition, 37)
+        expectEqual(mode.trackID, "spotify:track:A")
+        _ = mode.trackChanged(track(at: 37, playing: false))
+        expectEqual(mode.trackPosition, nil)
+    }
+
     test("with clips off a playing track is not searched") {
         var mode = ClipMode(isEnabled: false)
         expectEqual(mode.trackChanged(track()), [])

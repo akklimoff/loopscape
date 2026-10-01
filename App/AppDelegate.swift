@@ -93,6 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A curtain hiding a wallpaper that has no picture yet must stay down until it has one.
     private var awaitingFirstFrame = false
     private var packWait = 0
+    private var clipSync = ClipSync()
+    private var syncToken = 0
+    private var spotifyReadable = true
+    private let syncQueue = DispatchQueue(label: "com.aklimoff.loopscape.sync")
     /// Bumped when a different clip starts, not when the same one restarts, so a pack swap
     /// queued behind the curtain can tell that a newer clip has taken the screen.
     private var streamGeneration = 0
@@ -531,6 +535,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let playback = streamPlayback else { return }
         streamPlayback = nil
         awaitingFirstFrame = false
+        syncToken += 1
+        clipSync = ClipSync()
         playback.session.stop()
         playback.player.pause()
         playback.player.removeAllItems()
@@ -579,7 +585,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if written { self.syncDesktopPicture(still: still) }
             self.awaitingFirstFrame = false
             self.settleCurtain()
+            if frame != nil { self.scheduleSync(after: 0.5) }
         }
+    }
+
+    // MARK: - clip sync
+
+    private func scheduleSync(after delay: TimeInterval) {
+        syncToken += 1
+        let token = syncToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.syncToken == token else { return }
+            self.syncClip()
+        }
+    }
+
+    /// Spotify's own position is exact; the extrapolated one is the fallback when Spotify
+    /// does not answer or the user declined the Automation prompt.
+    private func syncClip() {
+        guard let playback = streamPlayback, let trackID = clipMode.trackID,
+              clipMode.trackPosition != nil, shouldPlay else { return scheduleSync(after: 3) }
+        guard spotifyReadable else { return lineUp(playback.session, trackTime: clipMode.trackPosition, source: "estimate") }
+        syncQueue.async { [weak self] in
+            let reading = SpotifyPosition.read()
+            DispatchQueue.main.async {
+                guard let self, self.streamPlayback?.session === playback.session else { return }
+                switch reading {
+                case .success(let reading) where reading.trackID == trackID:
+                    let now = reading.position + Date().timeIntervalSince(reading.at)
+                    self.lineUp(playback.session, trackTime: now, source: "Spotify")
+                case .failure(.denied):
+                    os_log("sync: Spotify declined Automation access — using the estimated position")
+                    self.spotifyReadable = false
+                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
+                default:
+                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
+                }
+            }
+        }
+    }
+
+    private func lineUp(_ session: StreamSession, trackTime: TimeInterval?, source: String) {
+        guard let playback = streamPlayback, playback.session === session, let trackTime,
+              playback.player.timeControlStatus == .playing else { return scheduleSync(after: 3) }
+        let clipTime = playback.player.currentTime().seconds
+        let duration = playback.player.currentItem?.duration.seconds
+        let action = clipSync.decide(clipTime: clipTime, trackTime: trackTime,
+                                     clipDuration: duration.flatMap { $0.isFinite ? $0 : nil })
+        let offset = clipTime - trackTime
+        let gap = String(format: "%.2f s %@ (%@)", abs(offset), offset < 0 ? "behind" : "ahead", source)
+        switch action {
+        case .keep:
+            break
+        case .rate(let rate):
+            os_log("sync: clip %{public}@, rate %{public}.3f", gap, rate)
+            session.setRate(rate)
+        case .seek(let position):
+            os_log("sync: clip %{public}@, seek to %{public}.1f s", gap, position)
+            session.setRate(1)
+            session.seek(to: position)
+        }
+        scheduleSync(after: clipSync.isNudging ? 1 : 3)
     }
 
     private func streamFailed(_ failure: StreamFailure) {
@@ -637,7 +703,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .pause:
                 if stream != nil { wallpapers.forEach { $0.pause() } }
             case .resume:
-                if stream != nil, shouldPlay { wallpapers.forEach { $0.resume() } }
+                if stream != nil, shouldPlay {
+                    wallpapers.forEach { $0.resume() }
+                    clipSync = ClipSync()
+                    streamPlayback?.session.setRate(1)
+                    scheduleSync(after: 0.5)
+                }
             case .retryLater(let trackID, let delay):
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }

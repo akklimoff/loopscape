@@ -68,6 +68,15 @@ struct ClipMode {
         return startPosition(of: track)
     }
 
+    var trackID: String? { track?.id }
+
+    /// Where the song is now, for lining a playing clip up with it; nil unless this track's
+    /// clip is on screen and playing.
+    var trackPosition: TimeInterval? {
+        guard case .showing = phase, clipOnScreen, let track, track.isPlaying else { return nil }
+        return position(of: track)
+    }
+
     /// Covers the clip still on screen while the next track resolves too, which has no
     /// playback position of its own but must still follow Spotify's pause.
     var isClipPaused: Bool {

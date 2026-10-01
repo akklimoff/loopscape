@@ -114,6 +114,13 @@ final class StreamSession {
         if pendingSeek == nil { player.play() }
     }
 
+    /// defaultRate is what play() resumes at, so a nudge survives a pause and the start seek.
+    func setRate(_ rate: Double) {
+        guard !finished else { return }
+        player.defaultRate = Float(rate)
+        if wantsPlay, isPositioned, player.rate != 0 { player.rate = Float(rate) }
+    }
+
     /// An item that is not ready yet must not be sought (AVPlayerItem raises), so the
     /// position waits for itemReady like the start position does.
     func seek(to position: TimeInterval) {
