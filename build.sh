@@ -100,7 +100,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAudioCaptureUsageDescription</key><string>Loopscape listens to Spotify for a few seconds per new music video to line the video up with the song. Nothing is saved or sent.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Loopscape listens to Spotify while a music video plays, to keep the video lined up with the song. Only the last few seconds are held in memory; nothing is saved or sent.</string>
   <key>NSAppleEventsUsageDescription</key><string>Loopscape reads where Spotify is in the song to keep the music video in sync. It never controls playback.</string>
 </dict>
 </plist>
