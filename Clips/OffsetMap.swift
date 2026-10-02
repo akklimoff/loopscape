@@ -26,7 +26,10 @@ struct OffsetMap: Equatable {
         points.first { $0.at > position }?.at
     }
 
+    /// A measurement that agrees changes nothing, so the checks that keep confirming a cut
+    /// do not drag it along behind them.
     mutating func set(_ offset: TimeInterval, at position: TimeInterval) {
+        guard points.isEmpty || abs(self.offset(at: position) - offset) >= Self.agreement else { return }
         points.removeAll { abs($0.at - position) < Self.mergeRadius }
         guard points.isEmpty || abs(self.offset(at: position) - offset) >= Self.agreement else { return }
         points.append(Point(at: position, offset: offset))

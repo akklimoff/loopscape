@@ -17,6 +17,7 @@ func matchingTests() {
         ("espresso-cover", "afGqwfRPU58"),
         ("stay-at-your-house", "_AAdae7diOU"),
         ("bag-of-grins", nil),
+        ("ne-otdam", "a0s6pmQVjtk"),
     ]
     for (slug, videoID) in expectedPicks {
         test("pick: \(slug)") {
@@ -27,7 +28,8 @@ func matchingTests() {
 
     test("normalize folds case, diacritics and punctuation") {
         expectEqual(ClipMatching.normalize("  Beyoncé — P!nk / AC/DC  "), "beyonce p nk ac dc")
-        expectEqual(ClipMatching.normalize("МакSим - Лучшая НОЧЬ"), "макsим лучшая ночь")
+        expectEqual(ClipMatching.normalize("МакSим - Лучшая НОЧЬ"), ClipMatching.normalize("MakSim - Luchshaya noch"))
+        expectEqual(ClipMatching.normalize("МакSим"), ClipMatching.normalize("Maksim"))
     }
 
     test("cleanTrackName drops Spotify decorations") {

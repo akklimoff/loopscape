@@ -58,10 +58,15 @@ enum ClipMatching {
 
     private static let qualityMarkers = ["remaster", "remastered", "4k", "hd", "hq", "1080p"].map(normalize)
 
-    /// Lowercased, diacritics folded, punctuation turned into single spaces — so "МакSим",
-    /// "P!nk" and "Beyoncé" compare equal however a title decorates them.
+    /// Spotify spells some Russian artists in Latin ("MakSim") where their videos keep the
+    /// Cyrillic ("МакSим"), so both are compared in Latin, the way names are usually romanised.
+    private static let toLatin = StringTransform(rawValue: "Russian-Latin/BGN; Any-Latin; Latin-ASCII")
+
+    /// Romanised, lowercased, diacritics folded, punctuation turned into single spaces — so
+    /// "МакSим", "P!nk" and "Beyoncé" compare equal however a title decorates them.
     static func normalize(_ text: String) -> String {
-        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        let latin = text.applyingTransform(toLatin, reverse: false) ?? text
+        let folded = latin.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         let spaced = String(folded.unicodeScalars.map {
             CharacterSet.alphanumerics.contains($0) ? Character($0) : " "
         })

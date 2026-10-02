@@ -30,6 +30,15 @@ func offsetMapTests() {
         expectEqual(map.points.count, 1)
     }
 
+    test("checks that confirm a cut leave it where it was placed") {
+        var map = OffsetMap()
+        map.set(1.7, at: 6)
+        map.set(9.7, at: 70)
+        for position in stride(from: 73.0, through: 100, by: 3) { map.set(9.7, at: position) }
+        for position in stride(from: 9.0, through: 60, by: 3) { map.set(1.7, at: position) }
+        expectEqual(map.points, [OffsetMap.Point(at: 6, offset: 1.7), OffsetMap.Point(at: 70, offset: 9.7)])
+    }
+
     test("a map round-trips through its stored form") {
         var map = OffsetMap()
         map.set(1.7, at: 20)

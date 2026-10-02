@@ -1,0 +1,42 @@
+{
+  "artist": "MakSim",
+  "name": "Не отдам",
+  "seconds": 201,
+  "candidates": [
+    {
+      "id": "a0s6pmQVjtk",
+      "title": "МакSим - Не отдам | Official Video",
+      "channel": "WOW TV",
+      "duration": 202,
+      "channel_is_verified": true
+    },
+    {
+      "id": "xLGVXQB7A0U",
+      "title": "МакSим   не отдам клип.",
+      "channel": "wwwpavelkorolevcom",
+      "duration": 219,
+      "channel_is_verified": null
+    },
+    {
+      "id": "Q8WJz-DmPVg",
+      "title": "МакSим - Знаешь ли ты (официальный клип)",
+      "channel": "Maksim",
+      "duration": 247,
+      "channel_is_verified": true
+    },
+    {
+      "id": "9UGbyImpomw",
+      "title": "Не отдам (Санкт-Петербург, БКЗ, Сольный концерт \"Это же я\")",
+      "channel": "Maksim",
+      "duration": 256,
+      "channel_is_verified": true
+    },
+    {
+      "id": "xRuspDJoOEI",
+      "title": "МакSим - Трудный возраст (официальный клип)",
+      "channel": "Maksim",
+      "duration": 203,
+      "channel_is_verified": true
+    }
+  ]
+}
