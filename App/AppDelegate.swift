@@ -5,14 +5,14 @@ import ServiceManagement
 import UniformTypeIdentifiers
 import os
 
-private let defaultRoot: URL = {
+let defaultRoot: URL = {
     let base = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
     return base.appendingPathComponent("Loopscape")
 }()
 
-private extension CurtainStyle {
+extension CurtainStyle {
     var menuTitle: String {
         switch self {
         case .silk: return Lang.t("Silk", "Шёлк")
@@ -24,7 +24,7 @@ private extension CurtainStyle {
     }
 }
 
-private enum Key {
+enum Key {
     static let root = "videosRoot"
     static let pinned = "pinnedSlug"
     static let minutes = "rotateMinutes"
@@ -35,7 +35,7 @@ private enum Key {
 }
 
 /// The system language decides the whole UI; anything other than Russian gets English.
-private enum Lang {
+enum Lang {
     static let isRussian = (Locale.preferredLanguages.first ?? "en").hasPrefix("ru")
 
     static func t(_ en: String, _ ru: String) -> String { isRussian ? ru : en }
@@ -56,86 +56,86 @@ struct StreamTarget {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var wallpapers: [ScreenWallpaper] = [] {
+    var wallpapers: [ScreenWallpaper] = [] {
         didSet { curtain.attach(wallpapers.map(\.curtain)) }
     }
-    private var packs: [Pack] = []
-    private var videoFiles: [String: URL] = [:]
-    private var statusItem: NSStatusItem?
-    private var timer: Timer?
-    private var libraryWatch: DispatchSourceFileSystemObject?
-    private var libraryReload: DispatchWorkItem?
-    private var currentSlug: String?
-    private var lastFrames: [NSRect] = []
-    private var root = defaultRoot
-    private var unposterable: Set<String> = []
-    private var activity: NSObjectProtocol?
-    private var stream: StreamTarget? {
+    var packs: [Pack] = []
+    var videoFiles: [String: URL] = [:]
+    var statusItem: NSStatusItem?
+    var timer: Timer?
+    var libraryWatch: DispatchSourceFileSystemObject?
+    var libraryReload: DispatchWorkItem?
+    var currentSlug: String?
+    var lastFrames: [NSRect] = []
+    var root = defaultRoot
+    var unposterable: Set<String> = []
+    var activity: NSObjectProtocol?
+    var stream: StreamTarget? {
         didSet { if stream == nil { stopStreamPlayback() } }
     }
-    private var streamPlayback: (session: StreamSession, player: AVQueuePlayer)?
-    private var streamPosition: TimeInterval? {
+    var streamPlayback: (session: StreamSession, player: AVQueuePlayer)?
+    var streamPosition: TimeInterval? {
         guard let seconds = streamPlayback?.player.currentTime().seconds, seconds.isFinite else { return nil }
         return seconds
     }
-    private var desktopStill: URL?
-    private let options: LaunchOptions
-    private let nowPlaying = NowPlaying()
-    private var clipMode = ClipMode(isEnabled: false)
-    private var resolver: ClipResolver?
-    private let clipQueue = DispatchQueue(label: "com.aklimoff.loopscape.clips")
-    private lazy var curtain: CurtainDirector = {
+    var desktopStill: URL?
+    let options: LaunchOptions
+    let nowPlaying = NowPlaying()
+    var clipMode = ClipMode(isEnabled: false)
+    var resolver: ClipResolver?
+    let clipQueue = DispatchQueue(label: "com.aklimoff.loopscape.clips")
+    lazy var curtain: CurtainDirector = {
         let director = CurtainDirector(
             style: CurtainStyle(rawValue: defaults.string(forKey: Key.curtain) ?? "") ?? .silk)
         director.onCovered = { [weak self] in self?.settleCurtain() }
         return director
     }()
     /// A curtain hiding a wallpaper that has no picture yet must stay down until it has one.
-    private var awaitingFirstFrame = false
-    private var packWait = 0
-    private var clipSync = ClipSync()
-    private var syncToken = 0
-    private var spotifyReadable = true
-    private let syncQueue = DispatchQueue(label: "com.aklimoff.loopscape.sync")
-    private var clipStore: ClipStore?
-    private let alignQueue = DispatchQueue(label: "com.aklimoff.loopscape.align")
-    private var alignToken = 0
-    private var listener: AnyObject?
-    private var soundtrack: (videoID: String, bands: [[Float]])?
+    var awaitingFirstFrame = false
+    var packWait = 0
+    var clipSync = ClipSync()
+    var syncToken = 0
+    var spotifyReadable = true
+    let syncQueue = DispatchQueue(label: "com.aklimoff.loopscape.sync")
+    var clipStore: ClipStore?
+    let alignQueue = DispatchQueue(label: "com.aklimoff.loopscape.align")
+    var alignToken = 0
+    var listener: AnyObject?
+    var soundtrack: (videoID: String, bands: [[Float]])?
     /// A cold start can land past the song; the second jump is buffered and lands in time.
-    private var jumpedAgain = false
-    private var unconfirmedOffset: (trackID: String, offset: TimeInterval)?
+    var jumpedAgain = false
+    var unconfirmedOffset: (trackID: String, offset: TimeInterval)?
     /// Often enough that a pause the video inserts is caught a few seconds in, not ten.
-    private static let alignEvery: TimeInterval = 3
-    private static let alignHearing: TimeInterval = 6
+    static let alignEvery: TimeInterval = 3
+    static let alignHearing: TimeInterval = 6
     /// A shift this large is a cut in the video or a chorus mistaken for another, and only a
     /// second check that agrees tells the two apart.
-    private static let alignConfirmBeyond: TimeInterval = 0.5
-    private static let cutSearch: TimeInterval = 18
+    static let alignConfirmBeyond: TimeInterval = 0.5
+    static let cutSearch: TimeInterval = 18
     /// Wide enough for any edit a video makes between two checks, narrow enough that a chorus
     /// heard again elsewhere in the song is out of reach.
-    private static let alignRadius: TimeInterval = 6
-    private static let alignSampleRate: Double = 12_000
+    static let alignRadius: TimeInterval = 6
+    static let alignSampleRate: Double = 12_000
     /// Between AVPlayer's play() and the picture moving.
-    private static let playLatency: TimeInterval = 0.05
-    private static let longestHold: TimeInterval = 4
+    static let playLatency: TimeInterval = 0.05
+    static let longestHold: TimeInterval = 4
     /// Bumped when a different clip starts, not when the same one restarts, so a pack swap
     /// queued behind the curtain can tell that a newer clip has taken the screen.
-    private var streamGeneration = 0
+    var streamGeneration = 0
     /// Tracks without a clip are usually known misses that resolve in milliseconds; waiting
     /// this long before covering spares them a curtain that would only open on the same pack.
-    private static let curtainDelay: TimeInterval = 0.3
+    static let curtainDelay: TimeInterval = 0.3
 
-    private let defaults = UserDefaults.standard
+    let defaults = UserDefaults.standard
 
-    private var isPaused: Bool { defaults.bool(forKey: Key.paused) }
+    var isPaused: Bool { defaults.bool(forKey: Key.paused) }
 
     /// Spotify's pause holds a clip still the way the menu's Pause holds everything.
-    private var displaysAsleep = false
-    private let pathMonitor = NWPathMonitor()
-    private var terminationSignal: DispatchSourceSignal?
-    private var network: (online: Bool, interfaces: [String])?
-    private var shouldPlay: Bool {
+    var displaysAsleep = false
+    let pathMonitor = NWPathMonitor()
+    var terminationSignal: DispatchSourceSignal?
+    var network: (online: Bool, interfaces: [String])?
+    var shouldPlay: Bool {
         !isPaused && !displaysAsleep && !clipMode.isClipPaused
     }
 
@@ -232,12 +232,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// space painted before the last pack switch — or never visited — still shows the
     /// system default during the switch animation, where only real wallpapers are drawn.
     /// Repainting on every space change covers each space as soon as it is entered.
-    @objc private func spaceChanged() {
+    @objc func spaceChanged() {
         realign()
         repaintDesktopPicture()
     }
 
-    private func realign() {
+    func realign() {
         let screens = NSScreen.screens
         if screens.count == wallpapers.count {
             zip(wallpapers, screens).forEach { $0.align(to: $1) }
@@ -245,1106 +245,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             wallpapers.forEach { $0.raise() }
         }
     }
-
-    // MARK: - packs
-
-    /// Asking AVFoundation instead of hardcoding extensions means any container the OS can
-    /// decode (mp4, mov, m4v, ts, ...) works, and new ones appear with OS updates for free.
-    private static let playableExtensions: Set<String> = {
-        var extensions: Set<String> = []
-        for type in AVURLAsset.audiovisualTypes() {
-            guard let ut = UTType(type.rawValue), ut.conforms(to: .movie) else { continue }
-            for ext in ut.tags[.filenameExtension] ?? [] { extensions.insert(ext.lowercased()) }
-        }
-        return extensions.isEmpty ? ["mp4", "mov", "m4v"] : extensions
-    }()
-
-    private func loadPacks() -> [Pack] {
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: wallpapersDirectory.path)) ?? []
-        videoFiles = [:]
-        for file in files.sorted() {
-            let url = wallpapersDirectory.appendingPathComponent(file)
-            guard Self.playableExtensions.contains(url.pathExtension.lowercased()) else { continue }
-            let slug = url.deletingPathExtension().lastPathComponent
-            if videoFiles[slug] == nil { videoFiles[slug] = url }
-        }
-
-        var known: [String: Pack] = [:]
-        if let data = try? Data(contentsOf: root.appendingPathComponent("packs.json")),
-           let decoded = try? JSONDecoder().decode([Pack].self, from: data) {
-            for pack in decoded { known[pack.slug] = pack }
-        }
-        return videoFiles.keys.sorted().map { known[$0] ?? Pack(slug: $0, ru: $0, en: $0) }
-    }
-
-    private var wallpapersDirectory: URL { root.appendingPathComponent("Wallpapers") }
-
-    /// Releases up to 1.2 kept the library in "videos".
-    private func migrateLegacyVideosFolder() {
-        let fm = FileManager.default
-        let legacy = root.appendingPathComponent("videos")
-        if fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: wallpapersDirectory.path) {
-            try? fm.moveItem(at: legacy, to: wallpapersDirectory)
-        }
-    }
-
-    // MARK: - screen saver
-
-    /// The companion .saver reads the library straight from this folder — its sandbox
-    /// grants read access to the whole disk — and needs only to be told which pack is on.
-    private func markCurrentForSaver(_ slug: String) {
-        try? slug.write(to: root.appendingPathComponent("current.txt"),
-                        atomically: true, encoding: .utf8)
-    }
-
-    /// Re-scans the folder and reconciles the screen with it: clips dropped in start
-    /// playing without a restart, and a clip deleted from under the current pack gives
-    /// way to another one instead of a frozen last frame.
-    private func reloadLibrary() {
-        packs = loadPacks()
-        unposterable = []
-        if stream != nil {
-            if !packs.contains(where: { $0.slug == currentSlug }) {
-                if packs.isEmpty {
-                    currentSlug = nil
-                } else {
-                    let slug = pick()
-                    currentSlug = slug
-                    markCurrentForSaver(slug)
-                }
-            }
-        } else if packs.isEmpty {
-            wallpapers.forEach { $0.tearDown() }
-            wallpapers = []
-            currentSlug = nil
-        } else if wallpapers.isEmpty {
-            rebuildScreens()
-            applySelection(pick())
-        } else if !packs.contains(where: { $0.slug == currentSlug }) {
-            applySelection(pick())
-        }
-        // Opening the menu must not reset the countdown, so only a stopped timer is touched.
-        if timer == nil || packs.count < 2 { restartTimer() }
-        refreshMenu()
-    }
-
-    /// Finder copies a large clip in many writes; waiting for the burst to settle keeps
-    /// AVPlayer from opening a half-written file.
-    private func watchLibrary() {
-        let descriptor = open(wallpapersDirectory.path, O_EVTONLY)
-        guard descriptor >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
-                                                               eventMask: [.write, .rename, .delete],
-                                                               queue: .main)
-        source.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.libraryReload?.cancel()
-            let reload = DispatchWorkItem { [weak self] in self?.reloadLibrary() }
-            self.libraryReload = reload
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reload)
-        }
-        source.setCancelHandler { close(descriptor) }
-        source.resume()
-        libraryWatch = source
-    }
-
-    private func url(for slug: String) -> URL {
-        videoFiles[slug] ?? wallpapersDirectory.appendingPathComponent("\(slug).mp4")
-    }
-
-    private func poster(for slug: String) -> URL? {
-        for ext in ["jpg", "jpeg", "png", "heic"] {
-            let still = wallpapersDirectory.appendingPathComponent("\(slug).\(ext)")
-            if FileManager.default.fileExists(atPath: still.path) { return still }
-        }
-        return generatePoster(for: slug)
-    }
-
-    /// A clip dropped in without a still would leave the menu bar strip blurring the old
-    /// wallpaper, so the first frame is extracted once and kept beside the clip. A clip
-    /// that yields no frame is remembered: the sync runs on every space change, and a
-    /// failed 4K decode on the main thread each time would make switching desktops lag.
-    private func generatePoster(for slug: String) -> URL? {
-        guard let clip = videoFiles[slug], !unposterable.contains(slug) else { return nil }
-        defer { if !FileManager.default.fileExists(atPath: posterPath(slug)) { unposterable.insert(slug) } }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: clip))
-        generator.appliesPreferredTrackTransform = true
-        guard let frame = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
-        // HEVC main10 clips come out as 16-bit frames, which the JPEG encoder rejects.
-        guard let context = CGContext(data: nil, width: frame.width, height: frame.height,
-                                      bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return nil }
-        context.draw(frame, in: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
-        guard let eightBit = context.makeImage(),
-              let jpeg = NSBitmapImageRep(cgImage: eightBit)
-                  .representation(using: .jpeg, properties: [.compressionFactor: 0.9])
-        else { return nil }
-        let still = URL(fileURLWithPath: posterPath(slug))
-        guard (try? jpeg.write(to: still, options: .atomic)) != nil else { return nil }
-        return still
-    }
-
-    private func posterPath(_ slug: String) -> String {
-        wallpapersDirectory.appendingPathComponent("\(slug).jpg").path
-    }
-
-    /// The menu bar blurs the *desktop picture*, not the window stack, so a video at
-    /// desktop level leaves the old wallpaper showing through the top strip. Painting the
-    /// system wallpaper with a still from the same clip makes that strip blend in.
-    ///
-    /// The wallpaper agent caches decoded pictures per display by URL and ignores the
-    /// file changing underneath — a fixed slot file rewritten on every switch left one
-    /// display showing the previous still. Every clip's still is therefore set under its
-    /// own, never-rewritten URL. setDesktopImageURL reaches only the active space of each
-    /// screen; spaceChanged repaints the others as they are entered.
-    private func syncDesktopPicture(_ slug: String) {
-        guard let still = poster(for: slug) else { return }
-        syncDesktopPicture(still: still)
-    }
-
-    private func syncDesktopPicture(still: URL) {
-        desktopStill = still
-        let imageOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
-            .imageScaling: NSNumber(value: NSImageScaling.scaleProportionallyUpOrDown.rawValue),
-            .allowClipping: true,
-        ]
-        for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(still, for: screen, options: imageOptions)
-        }
-    }
-
-    private func repaintDesktopPicture() {
-        if let desktopStill { syncDesktopPicture(still: desktopStill) }
-    }
-
-    private func pick() -> String {
-        if let pinned = defaults.string(forKey: Key.pinned),
-           packs.contains(where: { $0.slug == pinned }) {
-            return pinned
-        }
-        if packs.count == 1 { return packs[0].slug }
-        var slug = packs[Int.random(in: 0..<packs.count)].slug
-        if slug == currentSlug {
-            slug = packs[(packs.firstIndex { $0.slug == slug }! + 1) % packs.count].slug
-        }
-        return slug
-    }
-
-    // MARK: - screens
-
-    private func rebuildScreens() {
-        wallpapers.forEach { $0.tearDown() }
-        wallpapers = NSScreen.screens.map { ScreenWallpaper(screen: $0) }
-        lastFrames = NSScreen.screens.map { $0.frame }
-    }
-
-    /// setDesktopImageURL itself posts didChangeScreenParameters, so rebuilding on every
-    /// notification would tear the windows down and repaint the picture in a loop. Only a
-    /// real geometry change warrants new windows.
-    @objc private func screensChanged() {
-        // A display waking up or being unplugged can briefly report no screens; tearing
-        // down then would leave nothing to restore once it comes back.
-        guard !NSScreen.screens.isEmpty else { return }
-        guard NSScreen.screens.map({ $0.frame }) != lastFrames else {
-            realign()
-            return
-        }
-        let clipAt = streamPosition
-        rebuildScreens()
-        // A display attached after the last pack switch still shows the default system
-        // wallpaper, which the menu bar and "click to reveal desktop" blur instead of
-        // the video — repaint the still on every geometry change, not just on switch.
-        restorePlayback(clipAt: clipAt)
-    }
-
-    @objc private func screensDidSleep() {
-        displaysAsleep = true
-        wallpapers.forEach { $0.pause() }
-    }
-
-    @objc private func screensDidWake() {
-        displaysAsleep = false
-        if NSScreen.screens.map({ $0.frame }) != lastFrames, !NSScreen.screens.isEmpty {
-            let clipAt = streamPosition
-            rebuildScreens()
-            restorePlayback(clipAt: clipAt)
-        } else if stream != nil {
-            // The song kept playing while the displays slept; resuming the frozen frame would
-            // leave the video behind it by the whole sleep.
-            realign()
-            restorePlayback()
-        } else {
-            realign()
-            if shouldPlay { wallpapers.forEach { $0.resume() } }
-            // Waking repaints every screen from the wallpaper store; if a record went
-            // stale while the displays slept, this is where the default would show.
-            repaintDesktopPicture()
-        }
-    }
-
-    /// Every path that (re)creates windows starts them playing, so a paused session must
-    /// be re-frozen here or a display replug and launch would quietly resume it.
-    private func startPlayback(_ slug: String) {
-        let target = url(for: slug)
-        for wallpaper in wallpapers { wallpaper.play(target) }
-        if isPaused || displaysAsleep { wallpapers.forEach { $0.pause() } }
-        if curtain.isDown { awaitPackFrame() }
-    }
-
-    /// While the next track resolves, the clip on screen belongs to the previous one and the
-    /// mode machine has no position for it, so the player's own is the one to keep.
-    private func restorePlayback(clipAt playerPosition: TimeInterval? = nil) {
-        if let stream {
-            let position = clipMode.clipPosition ?? playerPosition ?? stream.position
-            startStream(StreamTarget(url: stream.url, position: position, stillID: stream.stillID),
-                        animated: awaitingFirstFrame)
-        } else if let slug = currentSlug {
-            startPlayback(slug)
-            syncDesktopPicture(slug)
-        }
-    }
-
-    private func awaitPackFrame() {
-        awaitingFirstFrame = true
-        packWait += 1
-        checkPackFrame(packWait, until: Date().addingTimeInterval(2))
-    }
-
-    private func checkPackFrame(_ wait: Int, until deadline: Date) {
-        guard wait == packWait, stream == nil else { return }
-        guard wallpapers.allSatisfy(\.isShowingPack) || Date() >= deadline else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.checkPackFrame(wait, until: deadline)
-            }
-            return
-        }
-        awaitingFirstFrame = false
-        settleCurtain()
-    }
-
-    private func switchPack(to slug: String) {
-        let generation = streamGeneration
-        curtain.whenCovered { [weak self] in
-            guard let self, self.streamGeneration == generation else { return }
-            self.applySelection(slug)
-        }
-    }
-
-    private func applySelection(_ slug: String) {
-        let wasStreaming = stream != nil
-        stream = nil
-        currentSlug = slug
-        rememberPin(slug)
-        startPlayback(slug)
-        syncDesktopPicture(slug)
-        markCurrentForSaver(slug)
-        refreshMenu()
-        if wasStreaming { restartTimer() }
-        settleCurtain()
-    }
-
-    // MARK: - streaming
-
-    private var cachesDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
-        return caches.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.aklimoff.loopscape")
-    }
-
-    private var stillsDirectory: URL {
-        cachesDirectory.appendingPathComponent("stills")
-    }
-
-    private func stopStreamPlayback() {
-        guard let playback = streamPlayback else { return }
-        streamPlayback = nil
-        awaitingFirstFrame = false
-        syncToken += 1
-        clipSync = ClipSync()
-        playback.session.stop()
-        playback.player.pause()
-        playback.player.removeAllItems()
-    }
-
-    /// An animated start keeps the pack on screen until the curtain has covered it; the clip
-    /// buffers on the shared player meanwhile, so the cover costs no time.
-    private func startStream(_ target: StreamTarget, animated: Bool = false) {
-        if stream?.url != target.url { streamGeneration += 1 }
-        stopStreamPlayback()
-        stream = target
-        timer?.invalidate()
-        timer = nil
-        if wallpapers.isEmpty { rebuildScreens() }
-        let started = Date()
-        let player = AVQueuePlayer()
-        player.isMuted = true
-        player.actionAtItemEnd = .advance
-        let session = StreamSession(url: target.url, player: player) { [weak self] failure in
-            self?.streamFailed(failure)
-        }
-        streamPlayback = (session, player)
-        session.onHeld = { [weak self, weak session] position in
-            guard let self, let session else { return }
-            self.held(session, at: position)
-        }
-        let show = { [weak self, weak session] in
-            guard let self, let session, self.streamPlayback?.session === session else { return }
-            self.wallpapers.forEach { $0.show(stream: session, on: player) }
-        }
-        if animated {
-            awaitingFirstFrame = true
-            curtain.whenCovered(show)
-        } else {
-            show()
-        }
-        session.start(at: target.position)
-        if !shouldPlay { session.pause() }
-
-        let still = stillsDirectory.appendingPathComponent("\(target.stillID).jpg")
-        let cached = FileManager.default.fileExists(atPath: still.path)
-        if cached { syncDesktopPicture(still: still) }
-        StreamStill.firstFrame(of: player,
-                               isPositioned: { [weak session] in session?.isPositioned ?? false }) { [weak self, weak session] frame in
-            guard let self, let session, self.streamPlayback?.session === session else { return }
-            let written = !cached && frame.map { StreamStill.write($0, to: still) } == true
-            os_log("stream: first frame after %{public}.2f s, still %{public}@",
-                   Date().timeIntervalSince(started),
-                   frame == nil ? "none, timed out" : cached ? "cached" : written ? "written" : "not written")
-            if written { self.syncDesktopPicture(still: still) }
-            self.awaitingFirstFrame = false
-            self.settleCurtain()
-            if frame != nil {
-                self.scheduleSync(after: 0.5)
-                self.startAligning(videoID: target.stillID)
-            }
-        }
-    }
-
-    // MARK: - clip alignment
-
-    /// A music video often runs ahead of or behind the album recording (an intro, a cut), and
-    /// no clock can see that; listening to Spotify and finding what it played in the video's
-    /// soundtrack can. Checked every few seconds near where the clip is expected, so a cut
-    /// mid-song is caught where it happens; what is measured is kept in clips.json.
-    private func startAligning(videoID: String) {
-        guard #available(macOS 14.2, *) else { return }
-        alignToken += 1
-        let token = alignToken
-        unconfirmedOffset = nil
-        guard listenToSpotify() else { return }
-        if soundtrack?.videoID == videoID { return scheduleAlignCheck(videoID: videoID, token: token) }
-        soundtrack = nil
-        let cache = SoundtrackCache(directory: cachesDirectory.appendingPathComponent("soundtracks"))
-        alignQueue.async { [weak self] in
-            let bands: [[Float]]
-            if let cached = cache.bands(of: videoID) {
-                bands = cached
-            } else {
-                do {
-                    let url = try OnDemandYtDlp().audio(videoID: videoID)
-                    let samples = try ClipAudio.load(url, sampleRate: Self.alignSampleRate)
-                    bands = AudioAlign.onsets(samples, sampleRate: Self.alignSampleRate)
-                    cache.save(bands, of: videoID)
-                } catch {
-                    return os_log("align: no soundtrack for %{public}@: %{public}@", videoID, String(describing: error))
-                }
-            }
-            DispatchQueue.main.async {
-                guard let self, self.alignToken == token else { return }
-                self.soundtrack = (videoID, bands)
-                self.scheduleAlignCheck(videoID: videoID, token: token)
-            }
-        }
-    }
-
-    /// Started with the clip rather than at its first check, so the first check already has
-    /// enough heard to place the clip.
-    @discardableResult
-    private func listenToSpotify() -> Bool {
-        guard #available(macOS 14.2, *) else { return false }
-        guard listener == nil else { return true }
-        do {
-            listener = try SpotifyAudio.listen()
-            return true
-        } catch {
-            os_log("align: cannot listen to Spotify: %{public}@", String(describing: error))
-            return false
-        }
-    }
-
-    private func stopAligning() {
-        alignToken += 1
-        guard #available(macOS 14.2, *) else { return }
-        (listener as? SpotifyAudio)?.stop()
-        listener = nil
-    }
-
-    private func scheduleAlignCheck(videoID: String, token: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.alignEvery) { [weak self] in
-            guard let self, self.alignToken == token else { return }
-            self.checkAlignment(videoID: videoID, token: token)
-        }
-    }
-
-    /// Spotify is read first: a seek during the stretch heard would otherwise go unseen until
-    /// the next sync, and the stretch would be placed against the wrong song position.
-    private func checkAlignment(videoID: String, token: Int) {
-        guard #available(macOS 14.2, *), let listener = listener as? SpotifyAudio,
-              let bands = soundtrack?.bands, soundtrack?.videoID == videoID,
-              let trackID = clipMode.trackID, clipMode.trackPosition != nil, shouldPlay, spotifyReadable,
-              let heard = listener.recent(seconds: Self.alignHearing) else {
-            return scheduleAlignCheck(videoID: videoID, token: token)
-        }
-        syncQueue.async { [weak self] in
-            let reading = try? SpotifyPosition.read().get()
-            DispatchQueue.main.async {
-                guard let self, self.alignToken == token else { return }
-                guard let reading, reading.trackID == trackID else {
-                    return self.scheduleAlignCheck(videoID: videoID, token: token)
-                }
-                self.clipMode.positionRead(reading.position, trackID: reading.trackID, at: reading.at)
-                guard let heardFrom = self.clipMode.songPosition(at: heard.startedAt), heardFrom >= 0 else {
-                    return self.scheduleAlignCheck(videoID: videoID, token: token)
-                }
-                let offsets = self.clipMode.offsets
-                self.alignQueue.async {
-                    let match = Self.place(heard, from: heardFrom, in: bands, offsets: offsets)
-                    DispatchQueue.main.async {
-                        guard self.alignToken == token else { return }
-                        self.alignmentChecked(match, heardFrom: heardFrom, trackID: trackID, videoID: videoID,
-                                              bands: bands, token: token)
-                        self.scheduleAlignCheck(videoID: videoID, token: token)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Near the offset in force first; only a stretch that is not there is looked for across
-    /// the whole soundtrack.
-    @available(macOS 14.2, *)
-    private static func place(_ heard: SpotifyAudio.Recording, from heardFrom: TimeInterval,
-                              in soundtrack: [[Float]], offsets: OffsetMap) -> AudioAlign.Match? {
-        let segment = AudioAlign.onsets(heard.samples, sampleRate: heard.sampleRate)
-        if !offsets.points.isEmpty,
-           let near = AudioAlign.locate(segment, in: soundtrack, near: heardFrom + offsets.offset(at: heardFrom),
-                                        within: alignRadius), near.isConfident {
-            return near
-        }
-        return AudioAlign.locate(segment, in: soundtrack)
-    }
-
-    private func alignmentChecked(_ match: AudioAlign.Match?, heardFrom: TimeInterval, trackID: String,
-                                  videoID: String, bands: [[Float]], token: Int) {
-        guard let match, match.isConfident else {
-            return os_log("align: %{public}@ at %{public}.1f s unsure (peak %{public}.2f, margin %{public}.2f)",
-                          videoID, heardFrom, match?.peak ?? 0, match?.margin ?? 0)
-        }
-        let measured = match.time - heardFrom
-        let current = clipMode.offsets.offset(at: heardFrom)
-        guard !clipMode.offsets.points.isEmpty, abs(measured - current) >= Self.alignConfirmBeyond else {
-            unconfirmedOffset = nil
-            return recordOffset(measured, at: heardFrom, trackID: trackID, videoID: videoID, peak: match.peak)
-        }
-        guard let unconfirmed = unconfirmedOffset, unconfirmed.trackID == trackID,
-              abs(unconfirmed.offset - measured) < Self.alignConfirmBeyond / 2 else {
-            unconfirmedOffset = (trackID, measured)
-            return os_log("align: %{public}@ at %{public}.1f s seems %{public}+.2f s off, checking again",
-                          videoID, heardFrom, measured - current)
-        }
-        unconfirmedOffset = nil
-        locateCut(to: measured, from: current, near: heardFrom, in: bands, token: token) { [weak self] cut in
-            self?.recordOffset(measured, at: cut ?? heardFrom, trackID: trackID, videoID: videoID, peak: match.peak)
-        }
-    }
-
-    /// The change was measured seconds after the video made it; placing it at the cut itself
-    /// is what lets the next play of the song jump at the right moment.
-    private func locateCut(to offset: TimeInterval, from previous: TimeInterval, near heardFrom: TimeInterval,
-                           in bands: [[Float]], token: Int, completion: @escaping (TimeInterval?) -> Void) {
-        guard #available(macOS 14.2, *), let listener = listener as? SpotifyAudio,
-              let heard = listener.recent(seconds: Self.cutSearch) ?? listener.recent(seconds: Self.alignHearing),
-              let from = clipMode.songPosition(at: heard.startedAt) else { return completion(nil) }
-        alignQueue.async { [weak self] in
-            let segment = AudioAlign.onsets(heard.samples, sampleRate: heard.sampleRate)
-            let cut = AudioAlign.cut(segment, from: from, in: bands, before: previous, after: offset)
-            DispatchQueue.main.async {
-                guard let self, self.alignToken == token else { return }
-                completion(cut.map { min($0, heardFrom + Self.alignHearing) })
-            }
-        }
-    }
-
-    private func recordOffset(_ offset: TimeInterval, at position: TimeInterval, trackID: String,
-                              videoID: String, peak: Float) {
-        let before = clipMode.offsets
-        guard clipMode.offsetMeasured(offset, at: position, trackID: trackID) else { return }
-        os_log("align: %{public}@ from %{public}.1f s runs %{public}.2f s behind Spotify (%{public}+.2f, peak %{public}.2f)",
-               videoID, position, offset, offset - before.offset(at: position), peak)
-        guard clipMode.offsets != before, let store = clipStore else { return }
-        let offsets = clipMode.offsets
-        clipQueue.async { store.recordOffsets(offsets, for: trackID) }
-        if clipMode.offsets.offset(at: clipMode.songPosition(at: Date()) ?? position) != before.offset(at: position) {
-            scheduleSync(after: 0)
-        }
-    }
-
-    /// The clip waits on its frame until the song gets there, so it starts in step instead of
-    /// wherever a seek of unknowable length happened to land.
-    private func held(_ session: StreamSession, at position: TimeInterval) {
-        guard spotifyReadable, let trackID = clipMode.trackID, clipMode.trackPosition != nil else {
-            return release(session, at: position)
-        }
-        syncQueue.async { [weak self] in
-            let reading = try? SpotifyPosition.read().get()
-            DispatchQueue.main.async {
-                guard let self, self.streamPlayback?.session === session else { return }
-                if let reading, reading.trackID == trackID {
-                    self.clipMode.positionRead(reading.position, trackID: reading.trackID, at: reading.at)
-                }
-                self.release(session, at: position)
-            }
-        }
-    }
-
-    private func release(_ session: StreamSession, at position: TimeInterval) {
-        guard let trackTime = clipMode.trackPosition else { return session.release(after: 0) }
-        let wait = position - trackTime - Self.playLatency
-        os_log("sync: held at %{public}.2f s, the song gets there in %{public}.2f s", position, wait)
-        if wait < -Self.alignConfirmBeyond, !jumpedAgain {
-            jumpedAgain = true
-            return session.jump(to: trackTime + ClipMode.seekLead)
-        }
-        jumpedAgain = false
-        session.release(after: min(max(wait, 0), Self.longestHold))
-    }
-
-    // MARK: - clip sync
-
-    private func scheduleSync(after delay: TimeInterval) {
-        syncToken += 1
-        let token = syncToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.syncToken == token else { return }
-            self.syncClip()
-        }
-    }
-
-    /// Spotify's own position is exact; the extrapolated one is the fallback when Spotify
-    /// does not answer or the user declined the Automation prompt.
-    private func syncClip() {
-        guard let playback = streamPlayback, let trackID = clipMode.trackID,
-              clipMode.trackPosition != nil, shouldPlay else { return scheduleSync(after: 3) }
-        guard spotifyReadable else { return lineUp(playback.session, trackTime: clipMode.trackPosition, source: "estimate") }
-        syncQueue.async { [weak self] in
-            let reading = SpotifyPosition.read()
-            DispatchQueue.main.async {
-                guard let self, self.streamPlayback?.session === playback.session else { return }
-                switch reading {
-                case .success(let reading) where reading.trackID == trackID:
-                    self.clipMode.positionRead(reading.position, trackID: reading.trackID, at: reading.at)
-                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "Spotify")
-                case .failure(.denied):
-                    os_log("sync: Spotify declined Automation access — using the estimated position")
-                    self.spotifyReadable = false
-                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
-                case .failure(.failed(let code)):
-                    os_log("sync: Spotify did not answer (%d)", code)
-                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
-                default:
-                    self.lineUp(playback.session, trackTime: self.clipMode.trackPosition, source: "estimate")
-                }
-            }
-        }
-    }
-
-    private func lineUp(_ session: StreamSession, trackTime: TimeInterval?, source: String) {
-        guard let playback = streamPlayback, playback.session === session, let trackTime,
-              playback.player.timeControlStatus == .playing else { return scheduleSync(after: 3) }
-        let clipTime = playback.player.currentTime().seconds
-        let duration = playback.player.currentItem?.duration.seconds
-        let action = clipSync.decide(clipTime: clipTime, trackTime: trackTime,
-                                     clipDuration: duration.flatMap { $0.isFinite ? $0 : nil })
-        let offset = clipTime - trackTime
-        let gap = String(format: "%.2f s %@ (%@)", abs(offset), offset < 0 ? "behind" : "ahead", source)
-        switch action {
-        case .keep:
-            break
-        case .rate(let rate):
-            os_log("sync: clip %{public}@, rate %{public}.3f", gap, rate)
-            session.setRate(rate)
-        case .seek(let position):
-            os_log("sync: clip %{public}@, seek to %{public}.1f s", gap, position)
-            session.setRate(1)
-            session.jump(to: position)
-        }
-        var next: TimeInterval = clipSync.isNudging ? 1 : 3
-        if let song = clipMode.songPosition(at: Date()), let change = clipMode.offsets.nextChange(after: song) {
-            next = min(next, max(0, change - song))
-        }
-        scheduleSync(after: next)
-    }
-
-    private func streamFailed(_ failure: StreamFailure) {
-        guard let failed = stream else { return }
-        let offline = network?.online == false
-        os_log("stream: %{public}@%{public}@ — back to the pack", failure.description,
-               offline ? " while offline" : "")
-        if !offline, let resolver {
-            clipQueue.async { resolver.forgetStream(of: failed.stillID) }
-        }
-        leaveStream()
-        apply(clipMode.streamFailed(offline: offline))
-    }
-
-    private func leaveStream() {
-        guard stream != nil else { return }
-        stream = nil
-        stopAligning()
-        restartTimer()
-        if let slug = currentSlug {
-            startPlayback(slug)
-            syncDesktopPicture(slug)
-        } else if !packs.isEmpty {
-            applySelection(pick())
-        } else {
-            wallpapers.forEach { $0.tearDown() }
-            wallpapers = []
-        }
-    }
-
-    // MARK: - Spotify clips
-
-    /// Stream URLs are signed for the client's IP, so a new path invalidates all of them;
-    /// a clip or a search that failed while offline gets its retry once a path is back.
-    private func networkChanged(online: Bool, interfaces: [String]) {
-        let previous = network
-        network = (online, interfaces)
-        guard let previous, online, !previous.online || previous.interfaces != interfaces else { return }
-        os_log("network: back on %{public}@", interfaces.joined(separator: ", "))
-        if let resolver { clipQueue.async { resolver.forgetAllStreams() } }
-        apply(clipMode.retryFailed())
-    }
-
-    private func apply(_ effects: [ClipEffect]) {
-        for effect in effects {
-            switch effect {
-            case .resolve(let query, let generation):
-                resolveClip(query, generation: generation)
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.curtainDelay) { [weak self] in
-                    guard let self, self.clipMode.isCurrent(generation) else { return }
-                    self.curtain.cover()
-                }
-            case .play(let videoID, let url, let position):
-                os_log("clip: %{public}@ from %{public}.1f s", videoID, position)
-                listenToSpotify()
-                startStream(StreamTarget(url: url, position: position, stillID: videoID), animated: true)
-            case .pause:
-                if stream != nil { wallpapers.forEach { $0.pause() } }
-            case .resume:
-                if stream != nil, shouldPlay {
-                    wallpapers.forEach { $0.resume() }
-                    clipSync = ClipSync()
-                    streamPlayback?.session.setRate(1)
-                    scheduleSync(after: 0.5)
-                }
-            case .retryLater(let trackID, let delay):
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self else { return }
-                    self.apply(self.clipMode.retryFailed(trackID: trackID))
-                }
-            case .pauseTimeout(let delay):
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self else { return }
-                    let effects = self.clipMode.pauseTimedOut()
-                    if !effects.isEmpty { os_log("clip: paused for %{public}.0f s — the pack plays meanwhile", ClipMode.pauseLimit) }
-                    self.apply(effects)
-                }
-            case .seek(let position):
-                os_log("clip: resync to %{public}.1f s", position)
-                clipSync = ClipSync()
-                streamPlayback?.session.setRate(1)
-                streamPlayback?.session.jump(to: position)
-                if streamPlayback != nil { scheduleSync(after: 3) }
-            case .leave:
-                os_log("clip: back to the pack")
-                let generation = streamGeneration
-                curtain.whenCovered { [weak self] in
-                    guard let self, self.streamGeneration == generation else { return }
-                    self.leaveStream()
-                }
-            }
-        }
-        settleCurtain()
-    }
-
-    private func settleCurtain() {
-        guard !clipMode.isResolving, !awaitingFirstFrame else { return }
-        curtain.reveal()
-    }
-
-    /// A resolve blocks for seconds, so resolves queue up behind each other during fast
-    /// skipping; each one re-checks on main that it is still wanted before it starts, so the
-    /// queue never works through a backlog of tracks that are already gone.
-    private func resolveClip(_ query: TrackQuery, generation: Int) {
-        guard let resolver else { return }
-        clipQueue.async { [weak self] in
-            let wanted = DispatchQueue.main.sync { self?.clipMode.isCurrent(generation) ?? false }
-            guard wanted else { return }
-            os_log("clip: resolving %{public}@ — %{public}@", query.artist, query.name)
-            let outcome: ResolveOutcome
-            do {
-                switch try resolver.resolve(query) {
-                case .stream(let videoID, let url, let offsets):
-                    outcome = .found(videoID: videoID, url: url, offsets: offsets)
-                case .none: outcome = .notFound
-                }
-            } catch ClipError.toolMissing {
-                os_log("clip: yt-dlp is not installed")
-                outcome = .toolMissing
-            } catch {
-                os_log("clip: resolve failed: %{public}@", String(describing: error))
-                outcome = .failed
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if outcome == .notFound {
-                    os_log("clip: no video for %{public}@ — %{public}@", query.artist, query.name)
-                }
-                self.apply(self.clipMode.resolved(outcome, generation: generation))
-            }
-        }
-    }
-
-    // MARK: - timer
-
-    private func restartTimer() {
-        guard stream == nil else { return }
-        timer?.invalidate()
-        timer = nil
-        let minutes = defaults.integer(forKey: Key.minutes)
-        guard minutes > 0, packs.count > 1, !isPaused else {
-            if let token = activity { ProcessInfo.processInfo.endActivity(token) }
-            activity = nil
-            return
-        }
-        let rotation = Timer(timeInterval: Double(minutes) * 60,
-                             repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.switchPack(to: self.pick())
-        }
-        rotation.tolerance = 30
-        // .common keeps the timer ticking while the status menu is open; App Nap would
-        // otherwise defer a background accessory's timers indefinitely, so hold an
-        // activity for as long as rotation is on.
-        RunLoop.main.add(rotation, forMode: .common)
-        timer = rotation
-        if activity == nil {
-            activity = ProcessInfo.processInfo.beginActivity(
-                options: .userInitiatedAllowingIdleSystemSleep,
-                reason: "Wallpaper rotation")
-        }
-    }
-
-    // MARK: - menu
-
-    /// The logo's stacked cards, redrawn at menu bar scale: the artwork itself is colored and
-    /// its card offsets disappear below ~20pt, while the status bar needs a monochrome template
-    /// so macOS can tint it for the light, dark and highlighted states.
-    private func statusIcon() -> NSImage {
-        let side: CGFloat = 18
-        let box: CGFloat = 12
-        let radius: CGFloat = 3
-        let offset: CGFloat = 4.6
-        let gap: CGFloat = 1.4
-        let line: CGFloat = 1.4
-
-        let image = NSImage(size: NSSize(width: side, height: side))
-        image.lockFocus()
-
-        let margin = (side - box - offset) / 2
-        let front = NSRect(x: margin + offset, y: margin, width: box, height: box)
-        let back = front.offsetBy(dx: -offset, dy: offset)
-
-        NSColor.black.setStroke()
-        let outline = NSBezierPath(roundedRect: back.insetBy(dx: line / 2, dy: line / 2),
-                                   xRadius: radius, yRadius: radius)
-        outline.lineWidth = line
-        outline.stroke()
-
-        NSGraphicsContext.current?.compositingOperation = .clear
-        NSBezierPath(roundedRect: front.insetBy(dx: -gap, dy: -gap),
-                     xRadius: radius + gap, yRadius: radius + gap).fill()
-
-        NSGraphicsContext.current?.compositingOperation = .sourceOver
-        NSColor.black.setFill()
-        NSBezierPath(roundedRect: front, xRadius: radius, yRadius: radius).fill()
-
-        image.unlockFocus()
-        image.isTemplate = true
-        image.accessibilityDescription = "Loopscape"
-        return image
-    }
-
-    private func buildStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = statusIcon()
-        let menu = NSMenu()
-        menu.delegate = self
-        menu.autoenablesItems = false
-        item.menu = menu
-        statusItem = item
-    }
-
-    private func refreshMenu() {
-        guard let menu = statusItem?.menu else { return }
-        menu.removeAllItems()
-        appendNowPlaying(to: menu)
-
-        guard !packs.isEmpty else {
-            appendEmptyState(to: menu)
-            return
-        }
-
-        let minutes = defaults.integer(forKey: Key.minutes)
-        for pack in packs {
-            let item = NSMenuItem(title: pack.title,
-                                  action: #selector(choosePack(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.representedObject = pack.slug
-            if pack.slug == currentSlug { item.state = minutes > 0 ? .mixed : .on }
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
-
-        let intervals = NSMenuItem(title: Lang.t("Interval", "Интервал"), action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        for value in [0, 5, 15, 30, 60] {
-            let entry = NSMenuItem(title: value == 0 ? Lang.t("Off", "Выключен")
-                                                 : Lang.t("\(value) min", "\(value) мин"),
-                                   action: #selector(setInterval(_:)),
-                                   keyEquivalent: "")
-            entry.target = self
-            entry.representedObject = value
-            entry.state = value == minutes ? .on : .off
-            submenu.addItem(entry)
-            if value == 0 { submenu.addItem(.separator()) }
-        }
-        intervals.submenu = submenu
-        menu.addItem(intervals)
-        menu.addItem(curtainItem())
-
-        menu.addItem(.separator())
-
-        let next = NSMenuItem(title: Lang.t("Next wallpaper", "Следующий фон"),
-                                action: #selector(nextPack), keyEquivalent: "")
-        next.target = self
-        menu.addItem(next)
-
-        let pause = NSMenuItem(title: isPaused ? Lang.t("Resume", "Продолжить")
-                                               : Lang.t("Pause", "Пауза"),
-                               action: #selector(togglePause), keyEquivalent: "")
-        pause.target = self
-        pause.state = isPaused ? .on : .off
-        menu.addItem(pause)
-        appendClipItems(to: menu)
-
-        menu.addItem(revealItem())
-        menu.addItem(loginItem())
-        menu.addItem(.separator())
-        menu.addItem(versionItem())
-        menu.addItem(quitItem())
-    }
-
-    private func appendNowPlaying(to menu: NSMenu) {
-        guard let track = nowPlaying.track else { return }
-        let item = NSMenuItem(title: track.menuTitle, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
-        menu.addItem(.separator())
-    }
-
-    private func appendClipItems(to menu: NSMenu) {
-        let clips = NSMenuItem(title: Lang.t("Spotify clips", "Клипы из Spotify"),
-                               action: #selector(toggleClips), keyEquivalent: "")
-        clips.target = self
-        clips.state = clipMode.isEnabled ? .on : .off
-        menu.addItem(clips)
-        guard clipMode.isEnabled, YtDlp.locate(in: YtDlp.defaultDirectories()) == nil else { return }
-        let hint = NSMenuItem(title: Lang.t("Needs yt-dlp: brew install yt-dlp",
-                                            "Нужен yt-dlp: brew install yt-dlp"),
-                              action: nil, keyEquivalent: "")
-        hint.isEnabled = false
-        menu.addItem(hint)
-    }
-
-    private func curtainItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Transition", "Переход"),
-                              action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        for style in CurtainStyle.allCases {
-            if style == .none { submenu.addItem(.separator()) }
-            let entry = NSMenuItem(title: style.menuTitle, action: #selector(chooseCurtain(_:)),
-                                   keyEquivalent: "")
-            entry.target = self
-            entry.representedObject = style.rawValue
-            entry.state = curtain.style == style ? .on : .off
-            entry.isEnabled = style == .none || CurtainView.isAvailable
-            submenu.addItem(entry)
-        }
-        item.submenu = submenu
-        return item
-    }
-
-    private func appendEmptyState(to menu: NSMenu) {
-        let hint = NSMenuItem(title: Lang.t("No wallpapers yet — drop clips in the folder below",
-                                            "Обоев пока нет — положи ролики в папку ниже"),
-                              action: nil, keyEquivalent: "")
-        hint.isEnabled = false
-        menu.addItem(hint)
-        menu.addItem(revealItem())
-        appendClipItems(to: menu)
-        menu.addItem(.separator())
-        menu.addItem(loginItem())
-        menu.addItem(.separator())
-        menu.addItem(versionItem())
-        menu.addItem(quitItem())
-    }
-
-    private func versionItem() -> NSMenuItem {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let item = NSMenuItem(title: "Loopscape \(version ?? "dev")", action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    private func revealItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Open wallpapers folder", "Открыть папку с обоями"),
-                              action: #selector(revealFolder), keyEquivalent: "")
-        item.target = self
-        return item
-    }
-
-    private func loginItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Launch at login", "Запускать при входе"),
-                              action: #selector(toggleLoginItem), keyEquivalent: "")
-        item.target = self
-        switch SMAppService.mainApp.status {
-        case .enabled: item.state = .on
-        case .requiresApproval: item.state = .mixed
-        default: item.state = .off
-        }
-        return item
-    }
-
-    private func quitItem() -> NSMenuItem {
-        let item = NSMenuItem(title: Lang.t("Quit", "Выйти"),
-                              action: #selector(quit), keyEquivalent: "q")
-        item.target = self
-        return item
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        reloadLibrary()
-    }
-
-    /// With rotation on, picking a pack means "show this one now" and the countdown starts
-    /// over; with the interval off it is the pack that survives the next launch.
-    @objc private func choosePack(_ sender: NSMenuItem) {
-        guard let slug = sender.representedObject as? String else { return }
-        clipMode.packChosen()
-        defaults.set(false, forKey: Key.paused)
-        restartTimer()
-        switchPack(to: slug)
-    }
-
-    @objc private func setInterval(_ sender: NSMenuItem) {
-        guard let value = sender.representedObject as? Int else { return }
-        defaults.set(value, forKey: Key.minutes)
-        restartTimer()
-        if let slug = currentSlug { rememberPin(slug) }
-        refreshMenu()
-    }
-
-    /// Without an interval there is nothing to rotate to, so the pack on screen is held
-    /// across launches instead of letting the next one pick at random.
-    private func rememberPin(_ slug: String) {
-        if defaults.integer(forKey: Key.minutes) > 0 {
-            defaults.removeObject(forKey: Key.pinned)
-        } else {
-            defaults.set(slug, forKey: Key.pinned)
-        }
-    }
-
-    @objc private func togglePause() {
-        defaults.set(!isPaused, forKey: Key.paused)
-        if isPaused {
-            wallpapers.forEach { $0.pause() }
-        } else if stream != nil {
-            // The song played on while the wallpaper was paused; resuming the frozen frame
-            // would leave the clip behind it by the whole pause.
-            restorePlayback(clipAt: streamPosition)
-        } else {
-            if shouldPlay { wallpapers.forEach { $0.resume() } }
-            repaintDesktopPicture()
-        }
-        restartTimer()
-        refreshMenu()
-    }
-
-    @objc private func chooseCurtain(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let style = CurtainStyle(rawValue: raw) else { return }
-        defaults.set(raw, forKey: Key.curtain)
-        curtain.style = style
-        refreshMenu()
-    }
-
-    @objc private func toggleClips() {
-        let enabled = !clipMode.isEnabled
-        defaults.set(enabled, forKey: Key.clips)
-        apply(clipMode.setEnabled(enabled))
-        refreshMenu()
-    }
-
-    @objc private func nextPack() {
-        guard packs.count > 1 else { return }
-        clipMode.packChosen()
-        defaults.set(false, forKey: Key.paused)
-        restartTimer()
-        let index = packs.firstIndex { $0.slug == currentSlug } ?? -1
-        switchPack(to: packs[(index + 1) % packs.count].slug)
-    }
-
-    @objc private func toggleLoginItem() {
-        let service = SMAppService.mainApp
-        do {
-            if service.status == .enabled {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
-        } catch {
-            NSSound.beep()
-        }
-        if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
-        }
-        refreshMenu()
-    }
-
-    @objc private func revealFolder() {
-        NSWorkspace.shared.open(wallpapersDirectory)
-    }
-
-    @objc private func quit() {
-        wallpapers.forEach { $0.tearDown() }
-        NSApp.terminate(nil)
-    }
-
 }

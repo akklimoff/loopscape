@@ -23,7 +23,7 @@ into the `resolve` command-line tool. `App/` holds the parts that talk to the sy
 | `App/SpotifyAudio.swift` | A Core Audio process tap on Spotify, the last 20 s in a ring buffer |
 | `App/ClipAudio.swift`, `Clips/SoundtrackCache.swift` | The video's soundtrack, decoded and cached as onset envelopes |
 | `Clips/AudioAlign.swift`, `Clips/OffsetMap.swift` | Where the heard stretch sits in the soundtrack; the offset per stretch of the song |
-| `App/AppDelegate.swift` | Wires the above together and runs `ClipMode`'s effects |
+| `App/AppDelegate+*.swift` | Wire the above together: `+SpotifyClips` runs `ClipMode`'s effects, `+Stream`, `+ClipSync` and `+ClipAlignment` drive playback |
 
 ## A track starts
 
