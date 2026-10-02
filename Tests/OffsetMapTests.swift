@@ -37,4 +37,14 @@ func offsetMapTests() {
         expectEqual(OffsetMap(stored: map.stored), map)
         expectEqual(OffsetMap(stored: 2.5).offset(at: 50), 2.5)
     }
+
+    test("the next change is the first point past the position") {
+        var map = OffsetMap()
+        expectEqual(map.nextChange(after: 0), nil)
+        map.set(1, at: 10)
+        map.set(4, at: 60)
+        expectEqual(map.nextChange(after: 5), 10)
+        expectEqual(map.nextChange(after: 10), 60)
+        expectEqual(map.nextChange(after: 61), nil)
+    }
 }

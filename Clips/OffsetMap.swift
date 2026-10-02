@@ -22,6 +22,10 @@ struct OffsetMap: Equatable {
         points.last { $0.at <= position }?.offset ?? points.first?.offset ?? 0
     }
 
+    func nextChange(after position: TimeInterval) -> TimeInterval? {
+        points.first { $0.at > position }?.at
+    }
+
     mutating func set(_ offset: TimeInterval, at position: TimeInterval) {
         points.removeAll { abs($0.at - position) < Self.mergeRadius }
         guard points.isEmpty || abs(self.offset(at: position) - offset) >= Self.agreement else { return }

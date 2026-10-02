@@ -120,6 +120,37 @@ enum AudioAlign {
         return Match(time: (Double(first) + refined) / frameRate, peak: scores[best], margin: scores[best] - rival)
     }
 
+    /// Where in the heard stretch the video switches from one offset to the other: short
+    /// pieces are scored at both, and the cut goes where the old offset stops winning.
+    /// Nil when one offset fits on both sides, so the switch was not heard.
+    static func cut(_ heard: [[Float]], from heardFrom: TimeInterval, in reference: [[Float]],
+                    before: TimeInterval, after: TimeInterval) -> TimeInterval? {
+        let piece = Int(2 * frameRate)
+        let step = Int(0.25 * frameRate)
+        guard let length = heard.first?.count, length >= 2 * piece else { return nil }
+        var leads: [Float] = []
+        for start in stride(from: 0, through: length - piece, by: step) {
+            let segment = heard.map { Array($0[start..<(start + piece)]) }
+            let song = heardFrom + Double(start) / frameRate
+            let old = locate(segment, in: reference, near: song + before, within: 0.02)?.peak ?? 0
+            let new = locate(segment, in: reference, near: song + after, within: 0.02)?.peak ?? 0
+            leads.append(old - new)
+        }
+        let total = leads.reduce(0, +)
+        var prefix: Float = 0
+        var best: (split: Int, value: Float)?
+        for split in 1..<leads.count {
+            prefix += leads[split - 1]
+            let value = 2 * prefix - total
+            if best == nil || value > best!.value { best = (split, value) }
+        }
+        guard let best else { return nil }
+        let oldSide = leads[..<best.split].reduce(0, +) / Float(best.split)
+        let newSide = leads[best.split...].reduce(0, +) / Float(leads.count - best.split)
+        guard oldSide > 0.2, newSide < -0.2 else { return nil }
+        return heardFrom + Double(best.split * step - step / 2 + piece / 2) / frameRate
+    }
+
     private static func normalise(_ values: [Float]) -> [Float]? {
         var mean: Float = 0
         vDSP_meanv(values, 1, &mean, vDSP_Length(values.count))

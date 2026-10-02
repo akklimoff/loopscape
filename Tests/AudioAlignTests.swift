@@ -71,4 +71,26 @@ func audioAlignTests() {
         let silence = AudioAlign.onsets([Float](repeating: 0, count: Int(12 * rate)), sampleRate: rate)
         expect(AudioAlign.locate(silence, in: song) == nil)
     }
+
+    test("a cut in the video is placed where the heard song stops matching the old offset") {
+        let video = AudioAlign.onsets(music(seconds: 90, sampleRate: rate, seed: 3), sampleRate: rate)
+        let heardFrom = 30.0
+        let before = 5.0
+        let after = 17.0
+        let cutAt = 39.0
+        let heard = video.map { band -> [Float] in
+            (0..<1500).map { frame in
+                let song = heardFrom + Double(frame) / AudioAlign.frameRate
+                return band[Int(((song + (song < cutAt ? before : after)) * AudioAlign.frameRate).rounded())]
+            }
+        }
+        let cut = AudioAlign.cut(heard, from: heardFrom, in: video, before: before, after: after)
+        expect(cut.map { abs($0 - cutAt) < 0.3 } == true, "\(String(describing: cut))")
+    }
+
+    test("no cut is placed when everything heard fits one offset") {
+        let video = AudioAlign.onsets(music(seconds: 90, sampleRate: rate, seed: 3), sampleRate: rate)
+        let heard = video.map { Array($0[3500..<5000]) }
+        expectEqual(AudioAlign.cut(heard, from: 30, in: video, before: 5, after: 17), nil)
+    }
 }

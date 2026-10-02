@@ -102,8 +102,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var alignToken = 0
     private var listener: AnyObject?
     private var soundtrack: (videoID: String, bands: [[Float]])?
-    private static let alignEvery: TimeInterval = 10
-    private static let alignHearing: TimeInterval = 8
+    /// A cold start can land past the song; the second jump is buffered and lands in time.
+    private var jumpedAgain = false
+    private var unconfirmedOffset: (trackID: String, offset: TimeInterval)?
+    /// Often enough that a pause the video inserts is caught a few seconds in, not ten.
+    private static let alignEvery: TimeInterval = 3
+    private static let alignHearing: TimeInterval = 6
+    /// A shift this large is a cut in the video or a chorus mistaken for another, and only a
+    /// second check that agrees tells the two apart.
+    private static let alignConfirmBeyond: TimeInterval = 0.5
+    private static let cutSearch: TimeInterval = 18
     /// Wide enough for any edit a video makes between two checks, narrow enough that a chorus
     /// heard again elsewhere in the song is out of reach.
     private static let alignRadius: TimeInterval = 6
@@ -624,13 +632,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard #available(macOS 14.2, *) else { return }
         alignToken += 1
         let token = alignToken
-        if listener == nil {
-            do {
-                listener = try SpotifyAudio.listen()
-            } catch {
-                return os_log("align: cannot listen to Spotify: %{public}@", String(describing: error))
-            }
-        }
+        unconfirmedOffset = nil
+        guard listenToSpotify() else { return }
         if soundtrack?.videoID == videoID { return scheduleAlignCheck(videoID: videoID, token: token) }
         soundtrack = nil
         let cache = SoundtrackCache(directory: cachesDirectory.appendingPathComponent("soundtracks"))
@@ -653,6 +656,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.soundtrack = (videoID, bands)
                 self.scheduleAlignCheck(videoID: videoID, token: token)
             }
+        }
+    }
+
+    /// Started with the clip rather than at its first check, so the first check already has
+    /// enough heard to place the clip.
+    @discardableResult
+    private func listenToSpotify() -> Bool {
+        guard #available(macOS 14.2, *) else { return false }
+        guard listener == nil else { return true }
+        do {
+            listener = try SpotifyAudio.listen()
+            return true
+        } catch {
+            os_log("align: cannot listen to Spotify: %{public}@", String(describing: error))
+            return false
         }
     }
 
@@ -695,7 +713,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let match = Self.place(heard, from: heardFrom, in: bands, offsets: offsets)
                     DispatchQueue.main.async {
                         guard self.alignToken == token else { return }
-                        self.alignmentChecked(match, heardFrom: heardFrom, trackID: trackID, videoID: videoID)
+                        self.alignmentChecked(match, heardFrom: heardFrom, trackID: trackID, videoID: videoID,
+                                              bands: bands, token: token)
                         self.scheduleAlignCheck(videoID: videoID, token: token)
                     }
                 }
@@ -717,21 +736,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return AudioAlign.locate(segment, in: soundtrack)
     }
 
-    private func alignmentChecked(_ match: AudioAlign.Match?, heardFrom: TimeInterval,
-                                  trackID: String, videoID: String) {
+    private func alignmentChecked(_ match: AudioAlign.Match?, heardFrom: TimeInterval, trackID: String,
+                                  videoID: String, bands: [[Float]], token: Int) {
         guard let match, match.isConfident else {
             return os_log("align: %{public}@ at %{public}.1f s unsure (peak %{public}.2f, margin %{public}.2f)",
                           videoID, heardFrom, match?.peak ?? 0, match?.margin ?? 0)
         }
         let measured = match.time - heardFrom
+        let current = clipMode.offsets.offset(at: heardFrom)
+        guard !clipMode.offsets.points.isEmpty, abs(measured - current) >= Self.alignConfirmBeyond else {
+            unconfirmedOffset = nil
+            return recordOffset(measured, at: heardFrom, trackID: trackID, videoID: videoID, peak: match.peak)
+        }
+        guard let unconfirmed = unconfirmedOffset, unconfirmed.trackID == trackID,
+              abs(unconfirmed.offset - measured) < Self.alignConfirmBeyond / 2 else {
+            unconfirmedOffset = (trackID, measured)
+            return os_log("align: %{public}@ at %{public}.1f s seems %{public}+.2f s off, checking again",
+                          videoID, heardFrom, measured - current)
+        }
+        unconfirmedOffset = nil
+        locateCut(to: measured, from: current, near: heardFrom, in: bands, token: token) { [weak self] cut in
+            self?.recordOffset(measured, at: cut ?? heardFrom, trackID: trackID, videoID: videoID, peak: match.peak)
+        }
+    }
+
+    /// The change was measured seconds after the video made it; placing it at the cut itself
+    /// is what lets the next play of the song jump at the right moment.
+    private func locateCut(to offset: TimeInterval, from previous: TimeInterval, near heardFrom: TimeInterval,
+                           in bands: [[Float]], token: Int, completion: @escaping (TimeInterval?) -> Void) {
+        guard #available(macOS 14.2, *), let listener = listener as? SpotifyAudio,
+              let heard = listener.recent(seconds: Self.cutSearch) ?? listener.recent(seconds: Self.alignHearing),
+              let from = clipMode.songPosition(at: heard.startedAt) else { return completion(nil) }
+        alignQueue.async { [weak self] in
+            let segment = AudioAlign.onsets(heard.samples, sampleRate: heard.sampleRate)
+            let cut = AudioAlign.cut(segment, from: from, in: bands, before: previous, after: offset)
+            DispatchQueue.main.async {
+                guard let self, self.alignToken == token else { return }
+                completion(cut.map { min($0, heardFrom + Self.alignHearing) })
+            }
+        }
+    }
+
+    private func recordOffset(_ offset: TimeInterval, at position: TimeInterval, trackID: String,
+                              videoID: String, peak: Float) {
         let before = clipMode.offsets
-        guard clipMode.offsetMeasured(measured, at: heardFrom, trackID: trackID) else { return }
-        let change = measured - before.offset(at: heardFrom)
-        os_log("align: %{public}@ at %{public}.1f s runs %{public}.2f s behind Spotify (%{public}+.2f, peak %{public}.2f)",
-               videoID, heardFrom, measured, change, match.peak)
-        if clipMode.offsets != before, let store = clipStore {
-            let offsets = clipMode.offsets
-            clipQueue.async { store.recordOffsets(offsets, for: trackID) }
+        guard clipMode.offsetMeasured(offset, at: position, trackID: trackID) else { return }
+        os_log("align: %{public}@ from %{public}.1f s runs %{public}.2f s behind Spotify (%{public}+.2f, peak %{public}.2f)",
+               videoID, position, offset, offset - before.offset(at: position), peak)
+        guard clipMode.offsets != before, let store = clipStore else { return }
+        let offsets = clipMode.offsets
+        clipQueue.async { store.recordOffsets(offsets, for: trackID) }
+        if clipMode.offsets.offset(at: clipMode.songPosition(at: Date()) ?? position) != before.offset(at: position) {
+            scheduleSync(after: 0)
         }
     }
 
@@ -757,6 +813,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let trackTime = clipMode.trackPosition else { return session.release(after: 0) }
         let wait = position - trackTime - Self.playLatency
         os_log("sync: held at %{public}.2f s, the song gets there in %{public}.2f s", position, wait)
+        if wait < -Self.alignConfirmBeyond, !jumpedAgain {
+            jumpedAgain = true
+            return session.jump(to: trackTime + ClipMode.seekLead)
+        }
+        jumpedAgain = false
         session.release(after: min(max(wait, 0), Self.longestHold))
     }
 
@@ -819,7 +880,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             session.setRate(1)
             session.jump(to: position)
         }
-        scheduleSync(after: clipSync.isNudging ? 1 : 3)
+        var next: TimeInterval = clipSync.isNudging ? 1 : 3
+        if let song = clipMode.songPosition(at: Date()), let change = clipMode.offsets.nextChange(after: song) {
+            next = min(next, max(0, change - song))
+        }
+        scheduleSync(after: next)
     }
 
     private func streamFailed(_ failure: StreamFailure) {
@@ -874,6 +939,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             case .play(let videoID, let url, let position):
                 os_log("clip: %{public}@ from %{public}.1f s", videoID, position)
+                listenToSpotify()
                 startStream(StreamTarget(url: url, position: position, stillID: videoID), animated: true)
             case .pause:
                 if stream != nil { wallpapers.forEach { $0.pause() } }
