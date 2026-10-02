@@ -1,0 +1,42 @@
+{
+  "artist": "Billie Eilish",
+  "name": "bad guy",
+  "seconds": 194,
+  "candidates": [
+    {
+      "id": "DyDfgMOUjCI",
+      "title": "Billie Eilish - bad guy",
+      "channel": "Billie Eilish",
+      "duration": 206,
+      "channel_is_verified": true
+    },
+    {
+      "id": "CkrkQmLiIbA",
+      "title": "Billie Eilish  - bad guy",
+      "channel": "SkripchaN New Music TV",
+      "duration": 206,
+      "channel_is_verified": null
+    },
+    {
+      "id": "eoiWhRo3A7w",
+      "title": "Billie Eilish, Justin Bieber - bad guy",
+      "channel": "eyelafd",
+      "duration": 192,
+      "channel_is_verified": null
+    },
+    {
+      "id": "4-TbQnONe_w",
+      "title": "Billie Eilish - bad guy (Lyrics)",
+      "channel": "7clouds",
+      "duration": 195,
+      "channel_is_verified": true
+    },
+    {
+      "id": "r0-dxO5LCtI",
+      "title": "Billie Eilish - bad guy (with Justin Bieber) [Official Music Video]",
+      "channel": "Base Off Reality",
+      "duration": 140,
+      "channel_is_verified": null
+    }
+  ]
+}

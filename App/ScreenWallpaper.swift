@@ -1,0 +1,120 @@
+import AppKit
+import AVFoundation
+
+/// AVPlayerLayer as the view's backing layer, so it always matches the window exactly.
+final class PlayerView: NSView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.backgroundColor = NSColor.black.cgColor
+        layer = playerLayer
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+}
+
+final class ScreenWallpaper {
+    /// A stall shorter than this is buffering; past it the network or the URL is gone, and
+    /// the regular pack is better than a frozen frame.
+    static let stallTimeout: TimeInterval = 20
+
+    private let window: NSWindow
+    private let view: PlayerView
+    let curtain: CurtainView
+    private let player = AVQueuePlayer()
+    private var looper: AVPlayerLooper?
+    /// A clip is one session on one player shared by every display, so the network and the
+    /// decoder do the work once; packs are local files and keep a player per display.
+    private var stream: StreamSession?
+
+    init(screen: NSScreen) {
+        let frame = screen.frame
+        let bounds = NSRect(origin: .zero, size: frame.size)
+        view = PlayerView(frame: bounds)
+        view.autoresizingMask = [.width, .height]
+        curtain = CurtainView(frame: bounds)
+        // PlayerView hosts its own layer, and AppKit does not manage subviews of a
+        // layer-hosting view, so the curtain sits beside it in a layer-backed container.
+        let container = NSView(frame: bounds)
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        container.addSubview(view)
+        container.addSubview(curtain)
+        window = NSWindow(contentRect: frame,
+                          styleMask: .borderless,
+                          backing: .buffered,
+                          defer: false)
+        window.contentView = container
+        // Below the desktop-icon layer, so icons and Stage Manager stay usable.
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
+        // .canJoinAllSpaces covers only desktop spaces; without .fullScreenAuxiliary the
+        // window is absent from fullscreen spaces, and every backdrop glimpse there
+        // (transitions, Split View gaps, menu bar reveal) shows the static poster instead.
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle,
+                                     .fullScreenAuxiliary]
+        window.ignoresMouseEvents = true
+        window.isOpaque = true
+        window.backgroundColor = .black
+        window.hasShadow = false
+        window.isReleasedWhenClosed = false
+        window.setFrame(frame, display: true)
+
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        view.playerLayer.player = player
+        window.orderFront(nil)
+    }
+
+    func play(_ url: URL) {
+        stream = nil
+        view.playerLayer.player = player
+        looper = nil
+        player.removeAllItems()
+        player.actionAtItemEnd = .none
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        player.play()
+    }
+
+    func show(stream session: StreamSession, on shared: AVPlayer) {
+        looper = nil
+        player.removeAllItems()
+        player.pause()
+        stream = session
+        view.playerLayer.player = shared
+    }
+
+    /// A looper's first item can take a beat to load; until then the window shows black.
+    var isShowingPack: Bool {
+        guard stream == nil, player.currentItem?.status == .readyToPlay else { return false }
+        return player.rate == 0 || player.currentTime().seconds > 0.05
+    }
+
+    func pause() { if let stream { stream.pause() } else { player.pause() } }
+
+    /// A desktop-level window is not always carried into a fullscreen space created after
+    /// it was ordered in; re-ordering on every space change makes it show up there too.
+    func raise() { window.orderFrontRegardless() }
+
+    /// While displays detach and reattach around sleep the window server is free to move
+    /// windows between screens, and the layout can come back identical to the one that
+    /// bypasses a rebuild — so the frame is re-asserted rather than trusted.
+    func align(to screen: NSScreen) {
+        if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
+        window.orderFrontRegardless()
+    }
+
+    func resume() { if let stream { stream.resume() } else { player.play() } }
+
+    func tearDown() {
+        curtain.isActive = false
+        stream = nil
+        view.playerLayer.player = nil
+        player.pause()
+        looper = nil
+        window.orderOut(nil)
+        window.close()
+    }
+}

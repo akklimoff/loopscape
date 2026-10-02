@@ -1,0 +1,42 @@
+{
+  "artist": "Rick Astley",
+  "name": "Never Gonna Give You Up",
+  "seconds": 213,
+  "candidates": [
+    {
+      "id": "dQw4w9WgXcQ",
+      "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)",
+      "channel": "Rick Astley",
+      "duration": 214,
+      "channel_is_verified": true
+    },
+    {
+      "id": "5SZYz7lZRRI",
+      "title": "Rick Astley - Never Gonna Give You Up (Official Music Video) (1987)",
+      "channel": "Super Top Songs",
+      "duration": 213,
+      "channel_is_verified": null
+    },
+    {
+      "id": "LLFhKaqnWwk",
+      "title": "Rick Astley - Never Gonna Give You Up (Official Animated Video)",
+      "channel": "Rick Astley",
+      "duration": 213,
+      "channel_is_verified": true
+    },
+    {
+      "id": "GtL1huin9EE",
+      "title": "InsurAAAnce & Rick Astley Never Gonna Give You Up",
+      "channel": "CSAA Insurance Group, a AAA Insurer",
+      "duration": 65,
+      "channel_is_verified": true
+    },
+    {
+      "id": "XGxIE1hr0w4",
+      "title": "Never Gonna Give You Up | Rick Astley Rocks New Year's Eve - BBC",
+      "channel": "BBC",
+      "duration": 234,
+      "channel_is_verified": true
+    }
+  ]
+}

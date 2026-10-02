@@ -2,12 +2,25 @@
 # Usage:
 #   ./build.sh              build, install to /Applications and launch
 #   ./build.sh --dest DIR   build the bundle into DIR and stop (used by make-dmg.sh)
+#   ./build.sh --test       build and run the unit tests, touch nothing else
 set -euo pipefail
 
 APP_NAME="Loopscape"
 BUNDLE_ID="com.aklimoff.loopscape"
-VERSION="1.6"
+VERSION="2.0"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == "--test" ]]; then
+    mkdir -p "$HERE/.build"
+    echo "==> compiling tests"
+    swiftc -swift-version 5 -target arm64-apple-macosx13.0 \
+        -o "$HERE/.build/tests" "$HERE"/Clips/*.swift "$HERE/App/LaunchOptions.swift" "$HERE/App/Track.swift" "$HERE/App/ClipMode.swift" "$HERE/App/Curtain.swift" "$HERE/App/ClipSync.swift" "$HERE"/Tests/*.swift
+    "$HERE/.build/tests" "$HERE/Tests/Fixtures"
+    echo "==> compiling resolve"
+    swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
+        -o "$HERE/.build/resolve" "$HERE"/Clips/*.swift "$HERE/Tools/resolve/main.swift"
+    exit 0
+fi
 
 DEST="/Applications"
 INSTALL=1
@@ -33,7 +46,7 @@ fi
 
 echo "==> compiling"
 swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
-    -o "$HERE/.build/${APP_NAME}" "$HERE/${APP_NAME}.swift"
+    -o "$HERE/.build/${APP_NAME}" "$HERE"/App/*.swift "$HERE"/Clips/*.swift
 
 SAVER_NAME="${APP_NAME}Saver"
 echo "==> compiling screen saver"
@@ -87,6 +100,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAudioCaptureUsageDescription</key><string>Loopscape listens to Spotify while a music video plays, to keep the video lined up with the song. Only the last few seconds are held in memory; nothing is saved or sent.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Loopscape reads where Spotify is in the song to keep the music video in sync. It never controls playback.</string>
 </dict>
 </plist>
 PLIST

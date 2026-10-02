@@ -6,3 +6,7 @@
 *.jpg
 *.png
 !icon.png
+
+.claude/
+.omc/
+.superpowers/

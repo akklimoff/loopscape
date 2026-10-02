@@ -1,0 +1,42 @@
+{
+  "artist": "Daft Punk",
+  "name": "Get Lucky (feat. Pharrell Williams & Nile Rodgers)",
+  "seconds": 369,
+  "candidates": [
+    {
+      "id": "CCHdMIEGaaM",
+      "title": "Daft Punk - Get Lucky (Official Video) feat. Pharrell Williams and Nile Rodgers",
+      "channel": "convar HUN",
+      "duration": 248,
+      "channel_is_verified": null
+    },
+    {
+      "id": "5NV6Rdv1a3I",
+      "title": "Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams, Nile Rodgers",
+      "channel": "Daft Punk",
+      "duration": 249,
+      "channel_is_verified": true
+    },
+    {
+      "id": "5NMPUcMeyvo",
+      "title": "DAFT PUNK - Get Lucky (feat. Pharrell Williams) (VIDEO)",
+      "channel": "Monsieur Blaya",
+      "duration": 471,
+      "channel_is_verified": null
+    },
+    {
+      "id": "of1XzU7-PHk",
+      "title": "Daft Punk - Get Lucky (Official Video) ft.  Pharrell Williams, Nile Rodgers (Album Version)",
+      "channel": "Discoverer5555",
+      "duration": 372,
+      "channel_is_verified": null
+    },
+    {
+      "id": "FoB9OiTJw40",
+      "title": "Daft Punk ft. Pharrell Williams - Get Lucky (Official MTV Video)",
+      "channel": "CAPTUREBOX ■ TUBE",
+      "duration": 247,
+      "channel_is_verified": null
+    }
+  ]
+}

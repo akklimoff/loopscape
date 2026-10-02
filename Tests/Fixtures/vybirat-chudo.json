@@ -1,0 +1,42 @@
+{
+  "artist": "NYUSHA",
+  "name": "Выбирать чудо",
+  "seconds": 266,
+  "candidates": [
+    {
+      "id": "RjObnc58fAM",
+      "title": "NYUSHA / НЮША - Выбирать чудо (Full HD)",
+      "channel": "NYUSHA MUSIC",
+      "duration": 232,
+      "channel_is_verified": true
+    },
+    {
+      "id": "IwpDzJE4fc8",
+      "title": "NYUSHA / НЮША - Где ты, там я (Official clip) HD",
+      "channel": "NYUSHA MUSIC",
+      "duration": 251,
+      "channel_is_verified": true
+    },
+    {
+      "id": "Jr4whm6y3P4",
+      "title": "Nyusha feat Arash - Выбирать чудо (Remake)  (official audio)",
+      "channel": "Velvet Music",
+      "duration": 166,
+      "channel_is_verified": true
+    },
+    {
+      "id": "T20_kxUQtmw",
+      "title": "НЮША / NYUSHA - ВЫБИРАТЬ ЧУДО (альбом 2010)",
+      "channel": "NYUSHA MUSIC",
+      "duration": 3851,
+      "channel_is_verified": true
+    },
+    {
+      "id": "FVaavwpOWNg",
+      "title": "NYUSHA / НЮША - Выше (Official clip) HD",
+      "channel": "NYUSHA MUSIC",
+      "duration": 239,
+      "channel_is_verified": true
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "artist": "Radiohead",
+  "name": "Treefingers",
+  "seconds": 222,
+  "candidates": [
+    {
+      "id": "NO_LXN9tNK0",
+      "title": "Radiohead - Treefingers (KID A MNESIA EXHIBITION Visualizer)",
+      "channel": "Vendas.",
+      "duration": 223,
+      "channel_is_verified": null
+    },
+    {
+      "id": "wlnR_U8K1rs",
+      "title": "Radiohead - Treefingers",
+      "channel": "Newfound Recordings",
+      "duration": 223,
+      "channel_is_verified": null
+    },
+    {
+      "id": "0gb5ZlZTQUw",
+      "title": "Radiohead - Treefingers",
+      "channel": "ZenithStream",
+      "duration": 254,
+      "channel_is_verified": null
+    },
+    {
+      "id": "s1ufc-oCikw",
+      "title": "Treefingers",
+      "channel": "Budi Brow",
+      "duration": 63,
+      "channel_is_verified": null
+    },
+    {
+      "id": "exBsYMGR9kE",
+      "title": "Radiohead TreeFingers Video",
+      "channel": "sathyn401",
+      "duration": 279,
+      "channel_is_verified": null
+    }
+  ]
+}

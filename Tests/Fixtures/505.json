@@ -1,0 +1,42 @@
+{
+  "artist": "Arctic Monkeys",
+  "name": "505",
+  "seconds": 253,
+  "candidates": [
+    {
+      "id": "iIfl5k2nQBQ",
+      "title": "Arctic Monkeys - 505 (Music Video)",
+      "channel": "Idiographic Pictures",
+      "duration": 293,
+      "channel_is_verified": null
+    },
+    {
+      "id": "CKI8iQTgZKU",
+      "title": "Arctic Monkeys - 505",
+      "channel": "Pizza Music",
+      "duration": 252,
+      "channel_is_verified": true
+    },
+    {
+      "id": "iIRnWv1k-js",
+      "title": "Arctic Monkeys - 505 (lyrics)",
+      "channel": "earth lyrics ",
+      "duration": 254,
+      "channel_is_verified": null
+    },
+    {
+      "id": "MrmPDUvKyLs",
+      "title": "505 - Arctic Monkeys",
+      "channel": "AIIthatgIitters2l",
+      "duration": 255,
+      "channel_is_verified": null
+    },
+    {
+      "id": "bhk-yqnGlpM",
+      "title": "Arctic Monkeys  - 505 | Reading Festival 2022",
+      "channel": "BBC Music",
+      "duration": 271,
+      "channel_is_verified": true
+    }
+  ]
+}

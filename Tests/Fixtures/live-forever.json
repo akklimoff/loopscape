@@ -1,0 +1,42 @@
+{
+  "artist": "Oasis",
+  "name": "Live Forever - Remastered",
+  "seconds": 276,
+  "candidates": [
+    {
+      "id": "TDe1DqxwJoc",
+      "title": "Oasis - Live Forever (Official HD Remastered Video)",
+      "channel": "Oasis",
+      "duration": 278,
+      "channel_is_verified": true
+    },
+    {
+      "id": "6qTPl5Do8mQ",
+      "title": "Oasis - Live Forever (Official Video - US Version)",
+      "channel": "Oasis",
+      "duration": 282,
+      "channel_is_verified": true
+    },
+    {
+      "id": "i_2mWhfOhGU",
+      "title": "Oasis - Live Forever (Official Video)",
+      "channel": "Oasis",
+      "duration": 280,
+      "channel_is_verified": true
+    },
+    {
+      "id": "NuFLAumYp3U",
+      "title": "Oasis - Live Forever (4K Remastered Music Video - US Version)",
+      "channel": "Video Vault",
+      "duration": 285,
+      "channel_is_verified": null
+    },
+    {
+      "id": "MM6XG1DOwrs",
+      "title": "Oasis - Live Forever (Acoustic) MTV 1994 (HD)",
+      "channel": "OasisOfficialMusic",
+      "duration": 278,
+      "channel_is_verified": null
+    }
+  ]
+}

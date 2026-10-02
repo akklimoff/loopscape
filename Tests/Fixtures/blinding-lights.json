@@ -1,0 +1,42 @@
+{
+  "artist": "The Weeknd",
+  "name": "Blinding Lights",
+  "seconds": 200,
+  "candidates": [
+    {
+      "id": "4NRXx6U8ABQ",
+      "title": "The Weeknd - Blinding Lights (Official Video)",
+      "channel": "The Weeknd",
+      "duration": 263,
+      "channel_is_verified": true
+    },
+    {
+      "id": "fHI8X4OXluQ",
+      "title": "The Weeknd - Blinding Lights (Official Audio)",
+      "channel": "The Weeknd",
+      "duration": 204,
+      "channel_is_verified": true
+    },
+    {
+      "id": "XwxLwG2_Sxk",
+      "title": "The Weeknd - Blinding Lights (Lyrics)",
+      "channel": "7clouds",
+      "duration": 200,
+      "channel_is_verified": true
+    },
+    {
+      "id": "ewfdRy5jfF8",
+      "title": "The Weeknd - Blinding Lights (Live On The 2020 MTV VMAs)",
+      "channel": "The Weeknd",
+      "duration": 199,
+      "channel_is_verified": true
+    },
+    {
+      "id": "o3noebwFgro",
+      "title": "The Weeknd - Blinding Lights (10 Minutes Version)",
+      "channel": "Music Beat",
+      "duration": 617,
+      "channel_is_verified": null
+    }
+  ]
+}

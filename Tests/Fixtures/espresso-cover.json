@@ -1,0 +1,42 @@
+{
+  "artist": "First to Eleven",
+  "name": "Espresso",
+  "seconds": 175,
+  "candidates": [
+    {
+      "id": "afGqwfRPU58",
+      "title": "\"Espresso\" - Sabrina Carpenter (Cover by First To Eleven)",
+      "channel": "First To Eleven",
+      "duration": 210,
+      "channel_is_verified": true
+    },
+    {
+      "id": "_QQ1fKl47u4",
+      "title": "First To Eleven LIVE! (Espresso - Sabrina Carpenter)",
+      "channel": "First To Eleven",
+      "duration": 2080,
+      "channel_is_verified": true
+    },
+    {
+      "id": "pav--oy0F5Y",
+      "title": "“crushcrushcrush” - Paramore (Cover by First to Eleven)",
+      "channel": "First To Eleven",
+      "duration": 206,
+      "channel_is_verified": true
+    },
+    {
+      "id": "jYwPUQTyLFo",
+      "title": "Espresso - Sabrina Carpenter (Live Electric Cover by First To Eleven)",
+      "channel": "F211 Bonkers",
+      "duration": 196,
+      "channel_is_verified": null
+    },
+    {
+      "id": "KglVj16r5Vw",
+      "title": "\"APT.\" - ROSÉ, Bruno Mars (Cover by First To Eleven)",
+      "channel": "First To Eleven",
+      "duration": 177,
+      "channel_is_verified": true
+    }
+  ]
+}

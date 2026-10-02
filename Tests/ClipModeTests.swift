@@ -1,0 +1,478 @@
+import Foundation
+
+private final class Clock {
+    var now = Date(timeIntervalSince1970: 1_900_000_000)
+}
+
+func clipModeTests() {
+    let url = URL(string: "https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1900003600/index.m3u8")!
+
+    func track(_ id: String = "spotify:track:A", artist: String = "Daft Punk",
+               at position: TimeInterval = 30, playing: Bool = true) -> Track {
+        Track(id: id, name: "Get Lucky", artist: artist, duration: 248.4, position: position,
+              isPlaying: playing)
+    }
+
+    func query(_ id: String = "spotify:track:A") -> TrackQuery {
+        TrackQuery(id: id, artist: "Daft Punk", name: "Get Lucky", seconds: 248)
+    }
+
+    func showing() -> ClipMode {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1)
+        return mode
+    }
+
+    func showing(at clock: Clock) -> ClipMode {
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        _ = mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1)
+        return mode
+    }
+
+    test("the mode is resolving from a track change until the outcome") {
+        var mode = ClipMode(isEnabled: true)
+        expect(!mode.isResolving)
+        _ = mode.trackChanged(track())
+        expect(mode.isResolving)
+        _ = mode.resolved(.notFound, generation: 1)
+        expect(!mode.isResolving)
+    }
+
+    test("the track position on a shown clip is extrapolated without the start lead") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 7
+        expectEqual(mode.trackPosition, 37)
+        expectEqual(mode.trackID, "spotify:track:A")
+        _ = mode.trackChanged(track(at: 37, playing: false))
+        expectEqual(mode.trackPosition, nil)
+    }
+
+    test("a clip with an offset starts that much further in and is synced against it") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        var offsets = OffsetMap()
+        offsets.set(2, at: 10)
+        expectEqual(mode.resolved(.found(videoID: "v", url: url, offsets: offsets), generation: 1),
+                    [.play(videoID: "v", url: url, position: 32 + ClipMode.startLead)])
+        clock.now += 5
+        expectEqual(mode.trackPosition, 37)
+        expectEqual(mode.offsets, offsets)
+    }
+
+    test("an offset measured while the clip plays applies from where it was heard") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expect(mode.offsetMeasured(2, at: 35, trackID: "spotify:track:A"))
+        expectEqual(mode.trackPosition, 42)
+        expect(!mode.offsetMeasured(3, at: 35, trackID: "spotify:track:B"))
+        expectEqual(mode.trackPosition, 42)
+    }
+
+    test("an offset change later in the song takes over once the song gets there") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.offsetMeasured(1, at: 30, trackID: "spotify:track:A")
+        _ = mode.offsetMeasured(4, at: 50, trackID: "spotify:track:A")
+        clock.now += 10
+        expectEqual(mode.trackPosition, 41)
+        clock.now += 15
+        expectEqual(mode.trackPosition, 59)
+    }
+
+    test("a position read from Spotify replaces the extrapolation, a seek included") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        mode.positionRead(5, trackID: "spotify:track:A", at: clock.now)
+        clock.now += 2
+        expectEqual(mode.trackPosition, 7)
+        _ = mode.offsetMeasured(1.5, at: 7, trackID: "spotify:track:A")
+        expectEqual(mode.trackPosition, 8.5)
+    }
+
+    test("a reading older than the last Spotify event is ignored") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let readAt = clock.now
+        clock.now += 1
+        _ = mode.trackChanged(track(at: 60))
+        mode.positionRead(5, trackID: "spotify:track:A", at: readAt)
+        expectEqual(mode.trackPosition, 60)
+    }
+
+    test("a position read for another track is ignored") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        mode.positionRead(100, trackID: "spotify:track:B", at: clock.now)
+        expectEqual(mode.trackPosition, 30)
+    }
+
+    test("the song's position at a past moment is known while nothing has moved it since") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now.addingTimeInterval(2)
+        clock.now += 10
+        expectEqual(mode.songPosition(at: heardFrom), 32)
+        mode.positionRead(40.1, trackID: "spotify:track:A", at: clock.now)
+        expectEqual(mode.songPosition(at: heardFrom), 32.1)
+    }
+
+    test("a seek seen in a reading hides where the song was before it") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now.addingTimeInterval(2)
+        clock.now += 10
+        mode.positionRead(90, trackID: "spotify:track:A", at: clock.now)
+        expectEqual(mode.songPosition(at: heardFrom), nil)
+        expectEqual(mode.songPosition(at: clock.now), 90)
+    }
+
+    test("a Spotify event hides where the song was before it") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        let heardFrom = clock.now
+        clock.now += 5
+        _ = mode.trackChanged(track(at: 35, playing: false))
+        _ = mode.trackChanged(track(at: 35))
+        expectEqual(mode.songPosition(at: heardFrom), nil)
+    }
+
+    test("with clips off a playing track is not searched") {
+        var mode = ClipMode(isEnabled: false)
+        expectEqual(mode.trackChanged(track()), [])
+    }
+
+    test("a playing track starts a resolve") {
+        var mode = ClipMode(isEnabled: true)
+        expectEqual(mode.trackChanged(track()), [.resolve(query(), generation: 1)])
+    }
+
+    test("a found clip plays from where the track is by now") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        clock.now += 4
+        expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
+                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 34 + ClipMode.startLead)])
+        expect(!mode.isClipPaused, "a playing track plays its clip")
+    }
+
+    test("a track paused while resolving starts its clip paused where it stopped") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        _ = mode.trackChanged(track(at: 30))
+        clock.now += 2
+        expectEqual(mode.trackChanged(track(at: 32, playing: false)), [])
+        clock.now += 5
+        expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1),
+                    [.play(videoID: "5NV6Rdv1a3I", url: url, position: 32),
+                     .pauseTimeout(after: ClipMode.pauseLimit - 5)])
+        expect(mode.isClipPaused, "a paused track holds its clip")
+        expectEqual(mode.clipPosition, 32)
+    }
+
+    test("a pause that outlasts the limit takes the clip off, and play brings it back") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.trackChanged(track(at: 30, playing: false))
+        clock.now += ClipMode.pauseLimit
+        expectEqual(mode.pauseTimedOut(), [.leave])
+        expect(!mode.isClipPaused, "the pack plays on while Spotify stays paused")
+        expectEqual(mode.trackChanged(track(at: 30)), [.resolve(query(), generation: 3)])
+    }
+
+    test("an earlier pause's timer does nothing to a later pause") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        _ = mode.trackChanged(track(at: 30, playing: false))
+        clock.now += 5
+        _ = mode.trackChanged(track(at: 30))
+        clock.now += 3
+        _ = mode.trackChanged(track(at: 33, playing: false))
+        clock.now += 2
+        expectEqual(mode.pauseTimedOut(), [])
+    }
+
+    test("a playing clip is never timed out") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 60
+        expectEqual(mode.pauseTimedOut(), [])
+    }
+
+    test("only the last of several quick skips gets a clip") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        for id in ["A", "B", "C", "D", "E"] { _ = mode.trackChanged(track("spotify:track:\(id)")) }
+        expect(!mode.isCurrent(1), "the first skip's resolve must be voided")
+        expect(mode.isCurrent(5), "the last skip's resolve must run")
+        expectEqual(mode.resolved(.found(videoID: "first", url: url), generation: 1), [])
+        expectEqual(mode.resolved(.found(videoID: "last", url: url), generation: 5),
+                    [.play(videoID: "last", url: url, position: 30 + ClipMode.startLead)])
+    }
+
+    test("a track without a video leaves the pack alone, paused or not") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.resolved(.notFound, generation: 1), [])
+        expectEqual(mode.trackChanged(track(playing: false)), [])
+        expectEqual(mode.trackChanged(track(playing: true)), [])
+        expect(mode.clipPosition == nil, "no clip is on screen")
+    }
+
+    test("the old clip stays until the next track resolves, then gives way if it has none") {
+        var mode = showing()
+        expectEqual(mode.trackChanged(track("spotify:track:B")),
+                    [.resolve(query("spotify:track:B"), generation: 2)])
+        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
+        expectEqual(mode.resolved(.failed, generation: 2), [.leave])
+    }
+
+    test("Spotify's pause and resume pause and resume the clip") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
+        clock.now += 60
+        expectEqual(mode.trackChanged(track(at: 40, playing: true)), [.resume])
+    }
+
+    test("a stopped or quit Spotify, or a new track arriving paused, takes the clip off") {
+        var stopped = showing()
+        expectEqual(stopped.trackChanged(nil), [.leave])
+        expectEqual(stopped.trackChanged(nil), [])
+
+        var skippedWhilePaused = showing()
+        expectEqual(skippedWhilePaused.trackChanged(track("spotify:track:B", playing: false)), [.leave])
+    }
+
+    test("ads, episodes, local files and tracks without an artist are never searched") {
+        var mode = ClipMode(isEnabled: true)
+        expectEqual(mode.trackChanged(track("spotify:ad:1")), [])
+        expectEqual(mode.trackChanged(track("spotify:episode:1")), [])
+        expectEqual(mode.trackChanged(track("spotify:local:::Demo:180")), [])
+        expectEqual(mode.trackChanged(track("spotify:track:B", artist: "")), [])
+    }
+
+    test("a failed stream is re-resolved once, then left on the pack") {
+        var mode = showing()
+        expectEqual(mode.streamFailed(), [.resolve(query(), generation: 2)])
+        expectEqual(mode.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 2).count, 1)
+        expectEqual(mode.streamFailed(), [])
+        expect(mode.clipPosition == nil, "no clip is on screen after the second failure")
+    }
+
+    test("switching clips off takes the clip down and voids the resolve in flight") {
+        var mode = showing()
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expectEqual(mode.setEnabled(false), [.leave])
+        expectEqual(mode.resolved(.found(videoID: "b", url: url), generation: 2), [])
+    }
+
+    test("a pack picked from the menu mid-clip holds until the next track") {
+        var mode = showing()
+        mode.packChosen()
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
+        expect(mode.clipPosition == nil, "the pack is on screen, not a clip")
+        expectEqual(mode.trackChanged(track(at: 40, playing: true)), [])
+        expectEqual(mode.trackChanged(track("spotify:track:B")),
+                    [.resolve(query("spotify:track:B"), generation: 3)])
+
+        var resolving = ClipMode(isEnabled: true)
+        _ = resolving.trackChanged(track())
+        resolving.packChosen()
+        expectEqual(resolving.resolved(.found(videoID: "5NV6Rdv1a3I", url: url), generation: 1), [])
+    }
+
+    test("switching clips on mid-track, or playing a restored track, starts a resolve") {
+        var mode = ClipMode(isEnabled: false)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.setEnabled(true), [.resolve(query(), generation: 1)])
+
+        var restored = ClipMode(isEnabled: true)
+        expectEqual(restored.trackChanged(track(playing: false)), [])
+        expectEqual(restored.trackChanged(track(playing: true)), [.resolve(query(), generation: 2)])
+    }
+
+    test("a failed resolve is retried when the same track resumes") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
+        expectEqual(mode.trackChanged(track(at: 40, playing: false)), [])
+        expectEqual(mode.trackChanged(track(at: 40)), [.resolve(query(), generation: 2)])
+    }
+
+    test("a track with no video is not searched again on resume") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.notFound, generation: 1)
+        _ = mode.trackChanged(track(at: 40, playing: false))
+        expectEqual(mode.trackChanged(track(at: 40)), [])
+    }
+
+    test("a stream lost while offline waits for the network instead of searching") {
+        var mode = showing()
+        expectEqual(mode.streamFailed(offline: true), [])
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
+    }
+
+    test("a resolve that failed is retried when the network returns") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.failed, generation: 1)
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
+    }
+
+    test("the network returning leaves a clip on screen and a track without a video alone") {
+        var shown = showing()
+        expectEqual(shown.retryFailed(), [])
+        var missing = ClipMode(isEnabled: true)
+        _ = missing.trackChanged(track())
+        _ = missing.resolved(.notFound, generation: 1)
+        expectEqual(missing.retryFailed(), [])
+    }
+
+    test("a paused track waits for its resume, not the network") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track(at: 40, playing: false))
+        expectEqual(mode.retryFailed(), [])
+    }
+
+    test("a repeat of the same track sends the clip back to the start") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 200
+        expectEqual(mode.trackChanged(track(at: 0)), [.seek(position: ClipMode.seekLead), .resume])
+    }
+
+    test("a scrub shows up at the next event and moves the clip") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.trackChanged(track(at: 100, playing: false)), [.seek(position: 100), .pause, .pauseTimeout(after: ClipMode.pauseLimit)])
+    }
+
+    test("a position within the drift allowance does not seek") {
+        let clock = Clock()
+        var mode = showing(at: clock)
+        clock.now += 10
+        expectEqual(mode.trackChanged(track(at: 41, playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
+    }
+
+    test("a failed resolve of a playing track asks for one retry later, not a loop") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track())
+        expectEqual(mode.resolved(.failed, generation: 1), [.retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
+        expectEqual(mode.retryFailed(), [.resolve(query(), generation: 2)])
+        expectEqual(mode.resolved(.failed, generation: 2), [])
+    }
+
+    test("a delayed retry belongs to its track, and a track played again gets a new one") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:A"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expectEqual(mode.resolved(.failed, generation: 2), [.retryLater(trackID: "spotify:track:B", after: ClipMode.retryDelay)])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:A"), [])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:B"), [.resolve(query("spotify:track:B"), generation: 3)])
+        _ = mode.resolved(.found(videoID: "b", url: url), generation: 3)
+        _ = mode.trackChanged(track("spotify:track:A"))
+        expectEqual(mode.resolved(.failed, generation: 4), [.leave, .retryLater(trackID: "spotify:track:A", after: ClipMode.retryDelay)])
+    }
+
+    test("the previous clip stays paused with Spotify while the next track resolves") {
+        var mode = showing()
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expectEqual(mode.trackChanged(track("spotify:track:B", playing: false)), [.pause, .pauseTimeout(after: ClipMode.pauseLimit)])
+        expect(mode.isClipPaused, "a paused Spotify must hold the clip still on screen")
+        _ = mode.trackChanged(track("spotify:track:B"))
+        expect(!mode.isClipPaused, "playing again releases it")
+    }
+
+    func resolvedQuery(_ effects: [ClipEffect]) -> TrackQuery? {
+        guard effects.count == 1, case .resolve(let query, _) = effects[0] else { return nil }
+        return query
+    }
+
+    func failThree(_ mode: inout ClipMode) {
+        for (index, id) in ["X", "Y", "Z"].enumerated() {
+            _ = mode.trackChanged(track("spotify:track:\(id)"))
+            _ = mode.resolved(.failed, generation: index + 1)
+        }
+    }
+
+    test("three failed resolves in a row back off for a quarter of an hour") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        failThree(&mode)
+        expectEqual(mode.trackChanged(track("spotify:track:A")),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff)])
+        expectEqual(mode.retryFailed(trackID: "spotify:track:A"),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff)])
+        clock.now += ClipMode.backoff + 1
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:B"))), query("spotify:track:B"))
+    }
+
+    test("the third failure asks for no delayed retry") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:X"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:Y"))
+        _ = mode.resolved(.failed, generation: 2)
+        _ = mode.trackChanged(track("spotify:track:Z"))
+        expectEqual(mode.resolved(.failed, generation: 3), [])
+    }
+
+    test("the network returning lifts the back-off") {
+        var mode = ClipMode(isEnabled: true)
+        failThree(&mode)
+        _ = mode.trackChanged(track("spotify:track:A"))
+        expectEqual(resolvedQuery(mode.retryFailed()), query("spotify:track:A"))
+    }
+
+    test("an answer from YouTube resets the failure count") {
+        var mode = ClipMode(isEnabled: true)
+        _ = mode.trackChanged(track("spotify:track:X"))
+        _ = mode.resolved(.failed, generation: 1)
+        _ = mode.trackChanged(track("spotify:track:Y"))
+        _ = mode.resolved(.notFound, generation: 2)
+        _ = mode.trackChanged(track("spotify:track:Z"))
+        _ = mode.resolved(.failed, generation: 3)
+        expectEqual(mode.trackChanged(track("spotify:track:A")), [.resolve(query("spotify:track:A"), generation: 4)])
+    }
+
+    test("the network returning lifts the back-off even with nothing to retry right now") {
+        var mode = ClipMode(isEnabled: true)
+        failThree(&mode)
+        _ = mode.trackChanged(track("spotify:track:A", playing: false))
+        expectEqual(mode.retryFailed(), [])
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:B"))), query("spotify:track:B"))
+    }
+
+    test("a missing yt-dlp neither counts toward the back-off nor asks for a delayed retry") {
+        var mode = ClipMode(isEnabled: true)
+        for (index, id) in ["X", "Y", "Z"].enumerated() {
+            _ = mode.trackChanged(track("spotify:track:\(id)"))
+            expectEqual(mode.resolved(.toolMissing, generation: index + 1), [])
+        }
+        expectEqual(resolvedQuery(mode.trackChanged(track("spotify:track:A"))), query("spotify:track:A"))
+    }
+
+    test("a track started during the back-off is retried when it ends") {
+        let clock = Clock()
+        var mode = ClipMode(isEnabled: true, now: { clock.now })
+        failThree(&mode)
+        clock.now += 600
+        expectEqual(mode.trackChanged(track("spotify:track:A")),
+                    [.retryLater(trackID: "spotify:track:A", after: ClipMode.backoff - 600)])
+        clock.now += ClipMode.backoff - 600
+        expectEqual(resolvedQuery(mode.retryFailed(trackID: "spotify:track:A")), query("spotify:track:A"))
+    }
+}
